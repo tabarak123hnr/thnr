@@ -1,0 +1,38 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && (
+          request.auth.token.admin == true
+          || request.auth.token.role == 'admin'
+        );
+    }
+
+    function isSelf(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // Roles — any staff can read; only admin can create/update/delete
+    match /roles/{roleId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Users — staff can read; admin manages; users can read their own doc
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Rest of the app data (rooms, orders, etc.) — signed-in staff for now
+    match /{document=**} {
+      allow read, write: if signedIn();
+    }
+  }
+}
