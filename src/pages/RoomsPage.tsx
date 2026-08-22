@@ -1,5 +1,6 @@
-import { BedDouble, ImagePlus, Plus, Sparkles, UserRound, X } from "lucide-react";
+import { BedDouble, CalendarPlus, ImagePlus, LogIn, LogOut, Plus, Sparkles, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -8,13 +9,20 @@ import { Modal } from "../components/ui/Modal";
 import { Field, Input, PageHeader, TextArea } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
+import { calcCheckoutBill } from "../lib/billing";
 import { uploadImagesToCloudinary } from "../lib/cloudinary";
 import { cn, formatRs } from "../lib/utils";
-import { createRoom, subscribeRooms, type HotelRoom, type HotelRoomStatus } from "../services/rooms";
 import {
   subscribeBookingRequests,
   type BookingRequest,
 } from "../services/bookingRequests";
+import {
+  checkoutGuest,
+  subscribeCheckIns,
+  type CheckInRecord,
+} from "../services/checkIns";
+import { createRoom, subscribeRooms, type HotelRoom, type HotelRoomStatus } from "../services/rooms";
+import { confirmCurrentUserPassword } from "../services/userManagement";
 import { isOpenBookingStatus } from "../types/bookingRequest";
 import { ROOM_TYPES, type CleaningStatus } from "../types/room";
 
@@ -73,6 +81,20 @@ function roomImageUrl(url: string, w = 640, h = 400) {
   return url.replace("/upload/", `/upload/c_fill,g_auto,w_${w},h_${h},f_auto,q_auto/`);
 }
 
+function mapReauthError(err: unknown) {
+  const code =
+    err && typeof err === "object" && "code" in err
+      ? String((err as { code: string }).code)
+      : "";
+  if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
+    return "Incorrect password. Try again.";
+  }
+  if (code === "auth/too-many-requests") {
+    return "Too many attempts. Wait a moment and try again.";
+  }
+  return err instanceof Error ? err.message : "Could not verify password.";
+}
+
 type RoomFormState = {
   number: string;
   floor: string;
@@ -96,10 +118,12 @@ const emptyForm: RoomFormState = {
 export function RoomsPage() {
   const { t, language } = useApp();
   const { success: toastSuccess, error: toastError } = useToast();
+  const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
   const [bookingRequests, setBookingRequests] = useState<BookingRequest[]>([]);
+  const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | HotelRoomStatus>("all");
   const [cleaningFilter, setCleaningFilter] = useState<"all" | CleaningStatus>("all");
@@ -111,6 +135,11 @@ export function RoomsPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [checkoutPassword, setCheckoutPassword] = useState("");
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+
   useEffect(() => {
     const unsubRooms = subscribeRooms((next) => {
       setRooms(next);
@@ -120,9 +149,11 @@ export function RoomsPage() {
       });
     });
     const unsubBookings = subscribeBookingRequests(setBookingRequests);
+    const unsubCheckIns = subscribeCheckIns(setCheckIns);
     return () => {
       unsubRooms();
       unsubBookings();
+      unsubCheckIns();
     };
   }, []);
 
@@ -153,6 +184,98 @@ export function RoomsPage() {
   const reservedRequest =
     selectedOpenBookings.find((b) => b.status === "reserved" || b.status === "confirmed") ??
     null;
+
+  const activeCheckIn = useMemo(() => {
+    if (!selected) return null;
+    const byId = selected.guest?.checkInId
+      ? checkIns.find((c) => c.id === selected.guest?.checkInId && c.status === "checked_in")
+      : null;
+    if (byId) return byId;
+    return (
+      checkIns.find((c) => c.roomId === selected.id && c.status === "checked_in") ?? null
+    );
+  }, [selected, checkIns]);
+
+  const canCheckIn =
+    Boolean(selected) &&
+    selected!.status !== "maintenance" &&
+    !selected!.guest &&
+    (selected!.status === "available" ||
+      selected!.status === "reserved" ||
+      selected!.status === "cleaning");
+
+  const canCheckOut = Boolean(selected && (selected.guest || activeCheckIn));
+
+  const canBookingRequest =
+    Boolean(selected) && selected!.status !== "maintenance";
+
+  const checkoutPreview = useMemo(() => {
+    if (!activeCheckIn) return null;
+    return calcCheckoutBill(
+      activeCheckIn.nightlyRate,
+      activeCheckIn.checkInAt,
+      activeCheckIn.plannedCheckOutAt || activeCheckIn.checkOutAt,
+      new Date().toISOString(),
+      activeCheckIn.extraCharges || 0,
+    );
+  }, [activeCheckIn]);
+
+  function goCheckIn() {
+    if (!selected || !canCheckIn) return;
+    navigate("/check-in", {
+      state: { openCreate: true, roomId: selected.id },
+    });
+  }
+
+  function goBookingRequest() {
+    if (!selected || !canBookingRequest) return;
+    navigate("/booking-requests", {
+      state: { openCreate: true, roomId: selected.id },
+    });
+  }
+
+  function openCheckout() {
+    if (!canCheckOut || !activeCheckIn) {
+      toastError("Check-out unavailable", "No active check-in found for this room.");
+      return;
+    }
+    setCheckoutPassword("");
+    setCheckoutError(null);
+    setCheckoutOpen(true);
+  }
+
+  function closeCheckout() {
+    if (checkoutBusy) return;
+    setCheckoutOpen(false);
+    setCheckoutPassword("");
+    setCheckoutError(null);
+  }
+
+  async function submitCheckout(e: React.FormEvent) {
+    e.preventDefault();
+    if (!activeCheckIn) return;
+    setCheckoutBusy(true);
+    setCheckoutError(null);
+    try {
+      await confirmCurrentUserPassword(checkoutPassword);
+      const result = await checkoutGuest(activeCheckIn.id, {
+        mode: "manual",
+        at: new Date().toISOString(),
+      });
+      setCheckoutOpen(false);
+      setCheckoutPassword("");
+      toastSuccess(
+        "Checked out",
+        result
+          ? `${result.guestName || "Guest"} · Room ${result.roomNumber} · ${formatRs(result.totalBill, t.common.rs)}`
+          : "Guest checked out.",
+      );
+    } catch (err) {
+      setCheckoutError(mapReauthError(err));
+    } finally {
+      setCheckoutBusy(false);
+    }
+  }
 
   function openAdd() {
     setForm(emptyForm);
@@ -577,10 +700,136 @@ export function RoomsPage() {
                   </div>
                 )}
               </div>
+
+              {selected.status !== "maintenance" ? (
+                <div className="rounded-2xl border border-app p-4">
+                  <p className="mb-3 text-sm font-bold">Quick actions</p>
+                  <div className="flex flex-col gap-2">
+                    {canCheckIn ? (
+                      <Button
+                        type="button"
+                        className="w-full cursor-pointer justify-center"
+                        icon={<LogIn className="h-4 w-4" />}
+                        onClick={goCheckIn}
+                      >
+                        {selected.status === "reserved" || reservedRequest
+                          ? "Check in reserved guest"
+                          : "Check in"}
+                      </Button>
+                    ) : null}
+                    {canCheckOut ? (
+                      <Button
+                        type="button"
+                        variant="danger"
+                        className="w-full cursor-pointer justify-center"
+                        icon={<LogOut className="h-4 w-4" />}
+                        onClick={openCheckout}
+                      >
+                        Check out
+                      </Button>
+                    ) : null}
+                    {canBookingRequest ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full cursor-pointer justify-center"
+                        icon={<CalendarPlus className="h-4 w-4" />}
+                        onClick={goBookingRequest}
+                      >
+                        New booking request
+                      </Button>
+                    ) : null}
+                    {!canCheckIn && !canCheckOut && !canBookingRequest ? (
+                      <p className="text-sm text-muted">No actions for this room status.</p>
+                    ) : null}
+                  </div>
+                  {canCheckIn && selected.status === "reserved" ? (
+                    <p className="mt-2 text-xs text-muted">
+                      Room is reserved — check-in will open with this room and guest details
+                      prefilled when available.
+                    </p>
+                  ) : null}
+                  {canCheckOut && !canCheckIn ? (
+                    <p className="mt-2 text-xs text-muted">
+                      Guest is in-house. Check-out frees the room and marks it dirty for
+                      housekeeping.
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="rounded-2xl border border-dashed border-app px-4 py-3 text-sm text-muted">
+                  Room is under maintenance — check-in and booking are disabled.
+                </p>
+              )}
             </div>
           )}
         </Card>
       </div>
+
+      <Modal
+        open={checkoutOpen}
+        onClose={closeCheckout}
+        title="Confirm check-out"
+        subtitle={
+          activeCheckIn
+            ? `${activeCheckIn.guestName} · Room ${activeCheckIn.roomNumber}`
+            : undefined
+        }
+        footer={
+          <>
+            <Button type="button" variant="secondary" disabled={checkoutBusy} onClick={closeCheckout}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="room-checkout-form"
+              variant="danger"
+              disabled={checkoutBusy || !checkoutPassword}
+            >
+              {checkoutBusy ? "Checking out…" : "Check out"}
+            </Button>
+          </>
+        }
+      >
+        <form id="room-checkout-form" className="space-y-4" onSubmit={(e) => void submitCheckout(e)}>
+          {checkoutPreview ? (
+            <div className="rounded-2xl border border-app bg-app px-4 py-3 text-sm">
+              {checkoutPreview.early ? (
+                <>
+                  <p className="text-muted">
+                    Planned: {checkoutPreview.plannedNights} night(s) (
+                    {formatRs(checkoutPreview.plannedTotal, t.common.rs)})
+                  </p>
+                  <p className="mt-1 font-bold">
+                    Early leave bill: {checkoutPreview.nights} night(s) (
+                    {formatRs(checkoutPreview.totalBill, t.common.rs)})
+                  </p>
+                </>
+              ) : (
+                <p className="font-bold">
+                  Bill: {checkoutPreview.nights} night(s) ·{" "}
+                  {formatRs(checkoutPreview.totalBill, t.common.rs)}
+                </p>
+              )}
+            </div>
+          ) : null}
+          <Field label="Your password">
+            <Input
+              type="password"
+              autoFocus
+              required
+              value={checkoutPassword}
+              onChange={(e) => setCheckoutPassword(e.target.value)}
+              placeholder="Confirm with your password"
+            />
+          </Field>
+          {checkoutError ? (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+              {checkoutError}
+            </p>
+          ) : null}
+        </form>
+      </Modal>
 
       <Modal
         open={addOpen}

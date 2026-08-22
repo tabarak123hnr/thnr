@@ -1,5 +1,6 @@
 import { Eye, IdCard, ImagePlus, Lock, LogOut, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -146,6 +147,8 @@ function BillSummary({
 export function CheckInPage() {
   const { t, language } = useApp();
   const { success: toastSuccess, error: toastError } = useToast();
+  const location = useLocation();
+  const navigate = useNavigate();
   const cnicFileRef = useRef<HTMLInputElement>(null);
 
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
@@ -190,8 +193,14 @@ export function CheckInPage() {
   }, [cnicPreview]);
 
   const availableRooms = useMemo(
-    () => rooms.filter((r) => r.status === "available"),
-    [rooms],
+    () =>
+      rooms.filter(
+        (r) =>
+          r.status === "available" ||
+          r.status === "reserved" ||
+          (lockedRoomId != null && r.id === lockedRoomId),
+      ),
+    [rooms, lockedRoomId],
   );
 
   const filtered = useMemo(() => {
@@ -240,6 +249,58 @@ export function CheckInPage() {
     setLockedRoomId(null);
     setMode("create");
   }
+
+  function openCreateForRoom(roomId: string) {
+    const room = rooms.find((r) => r.id === roomId);
+    if (!room) {
+      openCreate();
+      return;
+    }
+    if (room.status === "maintenance" || room.guest) {
+      toastError(
+        "Cannot check in",
+        room.guest
+          ? "This room already has a guest. Check them out first."
+          : "Room is under maintenance.",
+      );
+      return;
+    }
+
+    resetMedia();
+    const booking = room.booking;
+    const checkInAt = booking?.checkIn
+      ? isoToLocalInput(booking.checkIn)
+      : toLocalInputValue(new Date());
+    const checkOutAt = booking?.checkOut
+      ? isoToLocalInput(booking.checkOut)
+      : defaultCheckOut();
+
+    setForm({
+      ...emptyForm(),
+      roomId: room.id,
+      guestName: booking?.guestName || "",
+      phone: booking?.phone || "",
+      checkInAt,
+      checkOutAt,
+    });
+    setCompanions([]);
+    setNightlyRate(room.rate);
+    setExtraCharges(0);
+    setFormError(null);
+    setEditingId(null);
+    setLockedRoomId(room.id);
+    setMode("create");
+  }
+
+  useEffect(() => {
+    const state = location.state as { openCreate?: boolean; roomId?: string } | null;
+    if (!state?.openCreate || !rooms.length) return;
+    if (state.roomId) openCreateForRoom(state.roomId);
+    else openCreate();
+    navigate(location.pathname, { replace: true, state: null });
+    // Intentionally only when arriving with navigation state
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rooms, location.key]);
 
   function openEdit(row: CheckInRecord) {
     resetMedia();
@@ -501,12 +562,12 @@ export function CheckInPage() {
   }
 
   const roomOptions =
-    mode === "edit" && lockedRoomId
+    (mode === "edit" || mode === "create") && lockedRoomId
       ? rooms
           .filter((r) => r.id === lockedRoomId)
           .map((r) => ({
             value: r.id,
-            label: `Room ${r.number} · ${language === "ur" && r.typeUr ? r.typeUr : r.type}`,
+            label: `Room ${r.number} · ${language === "ur" && r.typeUr ? r.typeUr : r.type} · ${formatRs(r.rate, t.common.rs)}/night`,
           }))
       : availableRooms.map((r) => ({
           value: r.id,
@@ -898,7 +959,7 @@ export function CheckInPage() {
                 <FancySelect
                   value={form.roomId}
                   onChange={onRoomChange}
-                  disabled={mode === "edit"}
+                  disabled={mode === "edit" || Boolean(lockedRoomId && mode === "create")}
                   placeholder={
                     roomOptions.length ? "Select available room" : "No available rooms"
                   }

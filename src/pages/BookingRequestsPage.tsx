@@ -1,5 +1,6 @@
 import { Check, Eye, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -112,6 +113,8 @@ const emptyForm = () => ({
 export function BookingRequestsPage() {
   const { t, language } = useApp();
   const { success: toastSuccess, error: toastError } = useToast();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
@@ -125,6 +128,7 @@ export function BookingRequestsPage() {
   const [saving, setSaving] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [preferRoomId, setPreferRoomId] = useState<string | null>(null);
 
   useEffect(() => {
     const a = subscribeBookingRequests(setBookings);
@@ -172,16 +176,71 @@ export function BookingRequestsPage() {
   // Clear room if it becomes unavailable when dates change
   useEffect(() => {
     if (!form.roomId) return;
+    if (preferRoomId && form.roomId === preferRoomId) {
+      // Keep preferred room until it appears in the free list (or user changes dates)
+      if (availableForDates.some((a) => a.room.id === form.roomId)) {
+        setPreferRoomId(null);
+      }
+      return;
+    }
     if (!availableForDates.some((a) => a.room.id === form.roomId)) {
       setForm((p) => ({ ...p, roomId: "" }));
     }
-  }, [availableForDates, form.roomId]);
+  }, [availableForDates, form.roomId, preferRoomId]);
+
+  function datesAfterRoomFrees(room: HotelRoom) {
+    const freeAtRaw = room.guest?.checkOut || room.booking?.checkOut;
+    if (!freeAtRaw) {
+      return { checkInAt: defaultCheckIn(), checkOutAt: defaultCheckOut() };
+    }
+    const freeAt = new Date(freeAtRaw);
+    if (Number.isNaN(freeAt.getTime())) {
+      return { checkInAt: defaultCheckIn(), checkOutAt: defaultCheckOut() };
+    }
+    // Start at the moment the room frees (half-open availability)
+    const checkInAt = toLocalInputValue(freeAt);
+    const out = new Date(freeAt);
+    out.setDate(out.getDate() + 1);
+    out.setHours(12, 0, 0, 0);
+    return { checkInAt, checkOutAt: toLocalInputValue(out) };
+  }
 
   function openCreate() {
+    setPreferRoomId(null);
     setForm(emptyForm());
     setFormError(null);
     setCreateOpen(true);
   }
+
+  function openCreateForRoom(roomId: string) {
+    const room = rooms.find((r) => r.id === roomId);
+    if (!room) {
+      openCreate();
+      return;
+    }
+    if (room.status === "maintenance") {
+      toastError("Unavailable", "This room is under maintenance.");
+      return;
+    }
+    const dates = datesAfterRoomFrees(room);
+    setPreferRoomId(roomId);
+    setForm({
+      ...emptyForm(),
+      ...dates,
+      roomId,
+    });
+    setFormError(null);
+    setCreateOpen(true);
+  }
+
+  useEffect(() => {
+    const state = location.state as { openCreate?: boolean; roomId?: string } | null;
+    if (!state?.openCreate || !rooms.length) return;
+    if (state.roomId) openCreateForRoom(state.roomId);
+    else openCreate();
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rooms, location.key]);
 
   async function submitCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -227,6 +286,7 @@ export function BookingRequestsPage() {
         notes: form.notes,
       });
       setCreateOpen(false);
+      setPreferRoomId(null);
       toastSuccess(
         "Request created",
         `${form.guestName.trim()} · Room ${avail.room.number}`,
@@ -462,7 +522,11 @@ export function BookingRequestsPage() {
 
       <Modal
         open={createOpen}
-        onClose={() => !saving && setCreateOpen(false)}
+        onClose={() => {
+          if (saving) return;
+          setCreateOpen(false);
+          setPreferRoomId(null);
+        }}
         title="New booking request"
         subtitle="Pick dates first — only rooms free for that stay are listed (including rooms freeing after a current guest)."
         wide
@@ -472,7 +536,10 @@ export function BookingRequestsPage() {
               type="button"
               variant="secondary"
               disabled={saving}
-              onClick={() => setCreateOpen(false)}
+              onClick={() => {
+                setCreateOpen(false);
+                setPreferRoomId(null);
+              }}
             >
               {t.common.cancel}
             </Button>
