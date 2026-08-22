@@ -48,7 +48,6 @@ const ALL_PERMISSIONS = [
   "check_in",
   "bookings",
   "housekeeping",
-  "compliance",
   "qr_cards",
   "counter",
   "orders",

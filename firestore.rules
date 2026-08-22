@@ -18,19 +18,100 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function validRoomCreate() {
+      let d = request.resource.data;
+      return d.keys().hasAll([
+          'number', 'floor', 'type', 'rate', 'capacity', 'beds',
+          'description', 'images', 'status', 'cleaningStatus',
+          'cleanedBy', 'cleaningBy', 'guest', 'booking', 'openOrders',
+          'createdAt', 'updatedAt', 'createdBy'
+        ])
+        && d.number is string
+        && d.number.size() > 0
+        && d.number.size() <= 20
+        && d.floor is number
+        && d.floor >= 0
+        && d.type is string
+        && d.rate is number
+        && d.rate >= 0
+        && d.capacity is number
+        && d.capacity >= 1
+        && d.beds is number
+        && d.beds >= 1
+        && d.description is string
+        && d.images is list
+        && d.images.size() <= 6
+        && d.status in ['available', 'occupied', 'reserved', 'maintenance', 'cleaning']
+        && d.cleaningStatus in ['clean', 'dirty', 'cleaning_in_progress']
+        && d.openOrders is number
+        && d.createdBy == request.auth.uid;
+    }
+
+    function validRoomUpdate() {
+      let d = request.resource.data;
+      return d.number is string
+        && d.number.size() > 0
+        && d.floor is number
+        && d.type is string
+        && d.rate is number
+        && d.capacity is number
+        && d.beds is number
+        && d.images is list
+        && d.images.size() <= 6
+        && d.status in ['available', 'occupied', 'reserved', 'maintenance', 'cleaning']
+        && d.cleaningStatus in ['clean', 'dirty', 'cleaning_in_progress']
+        && d.openOrders is number;
+    }
+
     // Roles — any staff can read; only admin can create/update/delete
     match /roles/{roleId} {
       allow read: if signedIn();
       allow create, update, delete: if isAdmin();
     }
 
-    // Users — staff can read; admin manages; users can read their own doc
+    // Users — staff can read; admin manages
     match /users/{userId} {
       allow read: if signedIn();
       allow create, update, delete: if isAdmin();
     }
 
-    // Rest of the app data (rooms, orders, etc.) — signed-in staff for now
+    // Rooms — signed-in staff can manage (check-in / housekeeping will update later)
+    match /rooms/{roomId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && validRoomCreate();
+      allow update: if signedIn() && validRoomUpdate();
+      allow delete: if isAdmin();
+    }
+
+    // Check-ins — signed-in staff can create/list; admin can delete
+    match /checkIns/{checkInId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if isAdmin();
+    }
+
+    // Employees — signed-in staff manage roster
+    match /employees/{employeeId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if isAdmin();
+    }
+
+    // Housekeeping tasks — signed-in staff
+    match /housekeepingTasks/{taskId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if isAdmin();
+    }
+
+    // Booking requests
+    match /bookingRequests/{requestId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if isAdmin();
+    }
+
+    // Rest of the app data (orders, bookings, etc.) — signed-in staff for now
     match /{document=**} {
       allow read, write: if signedIn();
     }

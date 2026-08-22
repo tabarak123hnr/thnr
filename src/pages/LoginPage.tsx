@@ -2,6 +2,7 @@ import { BedDouble, Eye, EyeOff, Lock, Mail, Moon, Sun } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/Button";
+import { pathPermission } from "../config/navigation";
 import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
 
@@ -24,10 +25,10 @@ function mapAuthError(code: string) {
 
 export function LoginPage() {
   const { t, theme, toggleTheme, language, setLanguage } = useApp();
-  const { user, loading, login } = useAuth();
+  const { user, loading, login, defaultPath, hasPermission, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: string } | null)?.from || "/";
+  const requested = (location.state as { from?: string } | null)?.from;
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -35,8 +36,21 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function pickLanding(preferred?: string | null) {
+    if (preferred) {
+      const need = pathPermission[preferred];
+      if (!need || isAdmin || hasPermission(need)) return preferred;
+    }
+    if (requested && requested !== "/login") {
+      const need = pathPermission[requested];
+      if (!need || isAdmin || hasPermission(need)) return requested;
+    }
+    return defaultPath || preferred || "";
+  }
+
   if (!loading && user) {
-    return <Navigate to={from} replace />;
+    const home = pickLanding(defaultPath);
+    if (home) return <Navigate to={home} replace />;
   }
 
   async function onSubmit(e: FormEvent) {
@@ -44,8 +58,12 @@ export function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
-      navigate(from, { replace: true });
+      const home = await login(email, password);
+      if (!home) {
+        setError("No modules assigned to this account. Contact an admin.");
+        return;
+      }
+      navigate(home, { replace: true });
     } catch (err) {
       const code =
         err && typeof err === "object" && "code" in err

@@ -7,11 +7,11 @@ import { ToastProvider } from "./context/ToastProvider";
 import { AccountsPage } from "./pages/AccountsPage";
 import { BookingRequestsPage } from "./pages/BookingRequestsPage";
 import { CheckInPage } from "./pages/CheckInPage";
-import { CompliancePage } from "./pages/CompliancePage";
 import { CounterPage } from "./pages/CounterPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EmployeesPage } from "./pages/EmployeesPage";
 import { GuestAppPage } from "./pages/GuestAppPage";
+import { GuestsPage } from "./pages/GuestsPage";
 import { HousekeepingPage } from "./pages/HousekeepingPage";
 import { InvoicesPage } from "./pages/InvoicesPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -37,9 +37,9 @@ export default function App() {
                 <Route path="notifications" element={<NotificationsPage />} />
                 <Route path="rooms" element={<RoomsPage />} />
                 <Route path="check-in" element={<CheckInPage />} />
+                <Route path="guests" element={<GuestsPage />} />
                 <Route path="booking-requests" element={<BookingRequestsPage />} />
                 <Route path="housekeeping" element={<HousekeepingPage />} />
-                <Route path="compliance" element={<CompliancePage />} />
                 <Route path="qr-cards" element={<QrCardsPage />} />
                 <Route path="counter" element={<CounterPage />} />
                 <Route path="orders" element={<OrdersPage />} />

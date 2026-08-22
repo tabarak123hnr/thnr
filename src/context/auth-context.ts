@@ -17,8 +17,11 @@ export interface AuthContextValue {
   permissions: PermissionId[];
   isAdmin: boolean;
   hasPermission: (permission: string) => boolean;
+  /** First sidebar page this user can open (empty if none). */
+  defaultPath: string;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /** Signs in and returns the first allowed path for that user. */
+  login: (email: string, password: string) => Promise<string>;
   logout: () => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string | null>;
 }

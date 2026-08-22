@@ -1,17 +1,67 @@
 import {
   onAuthStateChanged,
+  setPersistence,
   signInWithEmailAndPassword,
   signOut,
+  browserLocalPersistence,
   type User,
 } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { PERMISSIONS, type PermissionId } from "../config/permissions";
-import { auth, db } from "../config/firebase";
+import { auth, authPersistenceReady, db } from "../config/firebase";
+import { firstAllowedPath, makePermissionChecker } from "../lib/permissions";
 import type { ManagedUserDoc } from "../services/userManagement";
 import { AuthContext, type AuthClaims } from "./auth-context";
 
 const ALL_PERMISSIONS = PERMISSIONS.map((p) => p.id);
+
+function clearLegacyIndexedDbAuth() {
+  if (typeof indexedDB === "undefined") return;
+  try {
+    indexedDB.deleteDatabase("firebaseLocalStorageDb");
+  } catch {
+    // ignore
+  }
+}
+
+function isAdminUser(claims: AuthClaims, profile: ManagedUserDoc | null, role: string | null) {
+  return (
+    claims.admin === true ||
+    role === "admin" ||
+    profile?.roleId === "admin" ||
+    profile?.roleName?.toLowerCase() === "admin"
+  );
+}
+
+async function loadProfile(uid: string, user: User, claims: AuthClaims): Promise<ManagedUserDoc> {
+  const snap = await getDoc(doc(db, "users", uid));
+  if (snap.exists()) {
+    return { id: snap.id, ...(snap.data() as Omit<ManagedUserDoc, "id">) };
+  }
+  const roleFromJwt = typeof claims.role === "string" ? claims.role : "admin";
+  const adminClaim = claims.admin === true || roleFromJwt === "admin";
+  return {
+    id: uid,
+    name: user.displayName || "Admin",
+    username: (user.email ?? "admin").split("@")[0],
+    phone: "",
+    email: user.email ?? "",
+    roleId: typeof claims.roleId === "string" ? claims.roleId : "admin",
+    roleName: roleFromJwt,
+    permissions: adminClaim ? ALL_PERMISSIONS : [],
+    status: "active",
+    lastActive: "Just now",
+  };
+}
+
+function claimsFromToken(tokenClaims: Record<string, unknown>): AuthClaims {
+  return {
+    role: typeof tokenClaims.role === "string" ? tokenClaims.role : undefined,
+    roleId: typeof tokenClaims.roleId === "string" ? tokenClaims.roleId : undefined,
+    admin: tokenClaims.admin === true,
+  };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -20,59 +70,71 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (next) => {
-      setUser(next);
-      if (!next) {
-        setProfile(null);
-        setClaims({});
-        setLoading(false);
-        return;
-      }
-      try {
-        const tokenResult = await next.getIdTokenResult(true);
-        setClaims({
-          role: typeof tokenResult.claims.role === "string" ? tokenResult.claims.role : undefined,
-          roleId:
-            typeof tokenResult.claims.roleId === "string"
-              ? tokenResult.claims.roleId
-              : undefined,
-          admin: tokenResult.claims.admin === true,
-        });
+    let cancelled = false;
+    let unsub = () => {};
 
-        const snap = await getDoc(doc(db, "users", next.uid));
-        if (snap.exists()) {
-          setProfile({ id: snap.id, ...(snap.data() as Omit<ManagedUserDoc, "id">) });
-        } else {
-          const roleFromJwt =
-            typeof tokenResult.claims.role === "string" ? tokenResult.claims.role : "admin";
-          const isAdminClaim = tokenResult.claims.admin === true || roleFromJwt === "admin";
-          setProfile({
-            id: next.uid,
-            name: next.displayName || "Admin",
-            username: (next.email ?? "admin").split("@")[0],
-            phone: "",
-            email: next.email ?? "",
-            roleId:
-              typeof tokenResult.claims.roleId === "string" ? tokenResult.claims.roleId : "admin",
-            roleName: roleFromJwt,
-            permissions: isAdminClaim ? ALL_PERMISSIONS : [],
-            status: "active",
-            lastActive: "Just now",
-          });
-        }
+    clearLegacyIndexedDbAuth();
+
+    void (async () => {
+      try {
+        await authPersistenceReady;
+        await setPersistence(auth, browserLocalPersistence);
       } catch {
-        setProfile(null);
-        setClaims({});
-      } finally {
-        setLoading(false);
+        // ignore
       }
-    });
-    return unsub;
+      if (cancelled) return;
+
+      unsub = onAuthStateChanged(auth, async (next) => {
+        if (!next) {
+          setUser(null);
+          setProfile(null);
+          setClaims({});
+          setLoading(false);
+          return;
+        }
+
+        setLoading(true);
+        setUser(next);
+        try {
+          const tokenResult = await next.getIdTokenResult(true);
+          const nextClaims = claimsFromToken(tokenResult.claims as Record<string, unknown>);
+          setClaims(nextClaims);
+          const nextProfile = await loadProfile(next.uid, next, nextClaims);
+          if (!cancelled) setProfile(nextProfile);
+        } catch {
+          if (!cancelled) {
+            setProfile(null);
+            setClaims({});
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
+    setLoading(true);
+    await setPersistence(auth, browserLocalPersistence);
     const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-    await cred.user.getIdToken(true);
+    const tokenResult = await cred.user.getIdTokenResult(true);
+    const nextClaims = claimsFromToken(tokenResult.claims as Record<string, unknown>);
+    const nextProfile = await loadProfile(cred.user.uid, cred.user, nextClaims);
+    setUser(cred.user);
+    setClaims(nextClaims);
+    setProfile(nextProfile);
+    setLoading(false);
+
+    const role = nextClaims.role || nextProfile.roleName || null;
+    const admin = isAdminUser(nextClaims, nextProfile, role);
+    const perms = admin ? ALL_PERMISSIONS : ((nextProfile.permissions ?? []) as PermissionId[]);
+    const check = makePermissionChecker(perms, admin);
+    return firstAllowedPath(check) || "/";
   }, []);
 
   const logout = useCallback(async () => {
@@ -85,12 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const role = claims.role || profile?.roleName || null;
-
-  const isAdmin =
-    claims.admin === true ||
-    role === "admin" ||
-    profile?.roleId === "admin" ||
-    profile?.roleName?.toLowerCase() === "admin";
+  const isAdmin = isAdminUser(claims, profile, role);
 
   const permissions = useMemo(() => {
     if (isAdmin) return ALL_PERMISSIONS;
@@ -98,11 +155,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isAdmin, profile?.permissions]);
 
   const hasPermission = useCallback(
-    (permission: string) => {
-      if (isAdmin) return true;
-      return permissions.includes(permission as PermissionId);
-    },
+    (permission: string) => makePermissionChecker(permissions, isAdmin)(permission),
     [isAdmin, permissions],
+  );
+
+  const defaultPath = useMemo(
+    () => firstAllowedPath(hasPermission),
+    [hasPermission],
   );
 
   const value = useMemo(
@@ -114,6 +173,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       permissions,
       isAdmin,
       hasPermission,
+      defaultPath,
       loading,
       login,
       logout,
@@ -127,6 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       permissions,
       isAdmin,
       hasPermission,
+      defaultPath,
       loading,
       login,
       logout,

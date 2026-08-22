@@ -4,12 +4,12 @@ import {
   BookOpen,
   CalendarClock,
   ClipboardList,
+  ContactRound,
   Landmark,
   LayoutDashboard,
   LogOut,
   QrCode,
   Receipt,
-  ShieldCheck,
   SlidersHorizontal,
   Smartphone,
   Sparkles,
@@ -24,6 +24,7 @@ import { NavLink } from "react-router-dom";
 import { navigation } from "../../config/navigation";
 import { useApp } from "../../context/app-context";
 import { useAuth } from "../../context/auth-context";
+import { useOpsBadges } from "../../hooks/useOpsBadges";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui/Badge";
 
@@ -32,9 +33,9 @@ const icons: Record<string, LucideIcon> = {
   Bell,
   BedDouble,
   UserPlus,
+  ContactRound,
   CalendarClock,
   Sparkles,
-  ShieldCheck,
   QrCode,
   UtensilsCrossed,
   ClipboardList,
@@ -50,6 +51,7 @@ const icons: Record<string, LucideIcon> = {
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useApp();
   const { profile, user, logout, role, hasPermission } = useAuth();
+  const { roomsBadge, housekeepingBadge } = useOpsBadges();
 
   const displayName = profile?.name || user?.displayName || "Staff";
   const roleLabel = role || profile?.roleName || t.roles.admin;
@@ -71,6 +73,12 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         .filter((section) => section.items.length > 0),
     [hasPermission],
   );
+
+  function resolveBadge(itemId: string, fallback?: number | string) {
+    if (itemId === "rooms") return roomsBadge;
+    if (itemId === "housekeeping") return housekeepingBadge;
+    return fallback ?? null;
+  }
 
   return (
     <aside className="flex h-full w-[260px] flex-col border-e border-app bg-sidebar">
@@ -98,6 +106,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               {section.items.map((item) => {
                 const Icon = icons[item.icon] ?? LayoutDashboard;
                 const label = t.nav[item.labelKey as keyof typeof t.nav];
+                const badge = resolveBadge(item.id, item.badge);
                 return (
                   <li key={item.id}>
                     <NavLink
@@ -123,7 +132,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                             strokeWidth={isActive ? 2.4 : 2}
                           />
                           <span className="flex-1 truncate">{label}</span>
-                          {item.badge != null ? (
+                          {badge != null && badge !== "" ? (
                             <Badge
                               tone={
                                 item.badgeTone === "danger"
@@ -134,7 +143,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                               }
                               className="ms-auto"
                             >
-                              {item.badge}
+                              {badge}
                             </Badge>
                           ) : null}
                         </>

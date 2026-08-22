@@ -1,16 +1,20 @@
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
   updateProfile,
 } from "firebase/auth";
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   type Unsubscribe,
 } from "firebase/firestore";
 import { auth, createSecondaryAuth, db } from "../config/firebase";
@@ -36,7 +40,9 @@ export interface ManagedUserDoc {
   permissions: PermissionId[];
   status: "active" | "invited" | "disabled";
   lastActive: string;
+  isAdmin?: boolean;
   createdAt?: unknown;
+  createdBy?: string;
 }
 
 export function subscribeRoles(onData: (roles: RoleDoc[]) => void): Unsubscribe {
@@ -126,4 +132,55 @@ export async function createManagedUser(input: {
   } finally {
     await dispose();
   }
+}
+
+export async function updateManagedUser(
+  userId: string,
+  input: {
+    name: string;
+    username: string;
+    phone: string;
+    roleId: string;
+    roleName: string;
+    permissions: PermissionId[];
+    status: ManagedUserDoc["status"];
+  },
+) {
+  if (!auth.currentUser) {
+    throw new Error("You must be signed in to edit users.");
+  }
+  await updateDoc(doc(db, "users", userId), {
+    name: input.name.trim(),
+    username: input.username.trim().toLowerCase(),
+    phone: input.phone.trim(),
+    roleId: input.roleId,
+    roleName: input.roleName,
+    permissions: input.permissions,
+    status: input.status,
+    updatedAt: serverTimestamp(),
+    updatedBy: auth.currentUser.uid,
+  });
+}
+
+/** Confirms the signed-in admin's password before sensitive actions. */
+export async function confirmCurrentUserPassword(password: string) {
+  const user = auth.currentUser;
+  if (!user?.email) {
+    throw new Error("You must be signed in to continue.");
+  }
+  if (!password.trim()) {
+    throw new Error("Password is required.");
+  }
+  const credential = EmailAuthProvider.credential(user.email, password);
+  await reauthenticateWithCredential(user, credential);
+}
+
+export async function deleteManagedUser(userId: string) {
+  if (!auth.currentUser) {
+    throw new Error("You must be signed in to delete users.");
+  }
+  if (userId === auth.currentUser.uid) {
+    throw new Error("You cannot delete your own account from here.");
+  }
+  await deleteDoc(doc(db, "users", userId));
 }

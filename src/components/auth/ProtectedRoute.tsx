@@ -1,18 +1,10 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { navigation, pathPermission } from "../../config/navigation";
+import { pathPermission } from "../../config/navigation";
 import { useAuth } from "../../context/auth-context";
-
-function firstAllowedPath(hasPermission: (p: string) => boolean) {
-  for (const section of navigation) {
-    for (const item of section.items) {
-      if (hasPermission(item.permission)) return item.path;
-    }
-  }
-  return "/login";
-}
+import { Button } from "../ui/Button";
 
 export function ProtectedRoute() {
-  const { user, loading, hasPermission, isAdmin } = useAuth();
+  const { user, loading, hasPermission, isAdmin, defaultPath, logout } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -30,9 +22,28 @@ export function ProtectedRoute() {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
+  if (!defaultPath) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-app px-6 text-center">
+        <h1 className="text-xl font-extrabold">No modules assigned</h1>
+        <p className="max-w-sm text-sm text-muted">
+          Your account has no page access yet. Ask an admin to grant permissions, then sign in again.
+        </p>
+        <Button type="button" onClick={() => void logout()}>
+          Sign out
+        </Button>
+      </div>
+    );
+  }
+
   const required = pathPermission[location.pathname];
   if (required && !isAdmin && !hasPermission(required)) {
-    return <Navigate to={firstAllowedPath(hasPermission)} replace />;
+    return <Navigate to={defaultPath} replace />;
+  }
+
+  // Logged in but landed on "/" without dashboard access
+  if (location.pathname === "/" && !isAdmin && !hasPermission("dashboard")) {
+    return <Navigate to={defaultPath} replace />;
   }
 
   return <Outlet />;

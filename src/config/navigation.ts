@@ -33,7 +33,6 @@ export const navigation: NavSection[] = [
         icon: "BedDouble",
         labelKey: "rooms",
         permission: "rooms",
-        badge: "5/10",
         badgeTone: "gold",
       },
       {
@@ -42,6 +41,13 @@ export const navigation: NavSection[] = [
         icon: "UserPlus",
         labelKey: "checkIn",
         permission: "check_in",
+      },
+      {
+        id: "guests",
+        path: "/guests",
+        icon: "ContactRound",
+        labelKey: "guests",
+        permission: "guests",
       },
       {
         id: "bookings",
@@ -56,15 +62,7 @@ export const navigation: NavSection[] = [
         icon: "Sparkles",
         labelKey: "housekeeping",
         permission: "housekeeping",
-        badge: 3,
         badgeTone: "gold",
-      },
-      {
-        id: "compliance",
-        path: "/compliance",
-        icon: "ShieldCheck",
-        labelKey: "compliance",
-        permission: "compliance",
       },
       {
         id: "qr",

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Outlet } from "react-router-dom";
+import { AutoCheckoutWatcher } from "../ops/AutoCheckoutWatcher";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
 
@@ -8,6 +9,7 @@ export function AppShell() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-app text-app">
+      <AutoCheckoutWatcher />
       <div className="hidden lg:block">
         <Sidebar />
       </div>

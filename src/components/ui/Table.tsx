@@ -4,17 +4,31 @@ import { cn } from "../../lib/utils";
 export function Table({
   headers,
   children,
+  colWidths,
 }: {
   headers: string[];
   children: ReactNode;
+  /** Optional widths like ["18%", "8%", ...] matching headers length */
+  colWidths?: string[];
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[640px] border-collapse text-sm">
+      <table className="w-full min-w-[720px] table-fixed border-collapse text-sm">
+        {colWidths?.length ? (
+          <colgroup>
+            {colWidths.map((w, i) => (
+              <col key={i} style={{ width: w }} />
+            ))}
+          </colgroup>
+        ) : null}
         <thead>
-          <tr className="border-b border-app text-start text-xs font-semibold uppercase tracking-wide text-muted">
-            {headers.map((h) => (
-              <th key={h} className="px-3 py-3 font-semibold first:ps-0 last:pe-0">
+          <tr className="border-b border-app text-xs font-semibold uppercase tracking-wide text-muted">
+            {headers.map((h, i) => (
+              <th
+                key={`${h}-${i}`}
+                scope="col"
+                className="px-3 py-3 text-left font-semibold align-middle"
+              >
                 {h}
               </th>
             ))}
@@ -34,7 +48,12 @@ export function Tr({
   className?: string;
 }) {
   return (
-    <tr className={cn("border-b border-app last:border-0 hover:bg-[var(--accent-soft)]/50 transition-colors", className)}>
+    <tr
+      className={cn(
+        "border-b border-app last:border-0 hover:bg-[color-mix(in_oklab,var(--accent-soft)_50%,transparent)] transition-colors",
+        className,
+      )}
+    >
       {children}
     </tr>
   );
@@ -50,7 +69,10 @@ export function Td({
   colSpan?: number;
 }) {
   return (
-    <td colSpan={colSpan} className={cn("px-3 py-3.5 align-middle first:ps-0 last:pe-0", className)}>
+    <td
+      colSpan={colSpan}
+      className={cn("px-3 py-3.5 text-left align-middle", className)}
+    >
       {children}
     </td>
   );
