@@ -9,7 +9,7 @@ import { Field, Input, PageHeader, StatCard, TextArea } from "../components/ui/P
 import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
-import { subscribeEmployees } from "../services/employees";
+import { subscribeEmployees, type Employee } from "../services/employees";
 import {
   createHousekeepingTask,
   subscribeHousekeepingTasks,
@@ -19,7 +19,7 @@ import {
   type HousekeepingTaskStatus,
   type HousekeepingTaskType,
 } from "../services/housekeeping";
-import { subscribeRooms } from "../services/rooms";
+import { subscribeRooms, type HotelRoom } from "../services/rooms";
 import { HOUSEKEEPING_TASK_TYPES } from "../types/housekeeping";
 
 const priorityTone: Record<HousekeepingPriority, "danger" | "gold" | "muted"> = {
