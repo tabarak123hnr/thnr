@@ -123,8 +123,16 @@ function paymentStatusForCreate(timing: PaymentTiming): PaymentStatus {
   return timing === "paid_at_checkin" ? "paid" : "pending";
 }
 
-function paymentStatusOnCheckout(timing: PaymentTiming): PaymentStatus {
-  return timing === "paid_at_checkin" ? "paid" : "due";
+function paymentStatusOnCheckout(
+  timing: PaymentTiming,
+  options?: { paymentReceived?: boolean },
+): PaymentStatus {
+  if (timing === "paid_at_checkin") return "paid";
+  // Manual checkout: staff confirm cash received via checkbox (default paid).
+  if (options?.paymentReceived === true) return "paid";
+  if (options?.paymentReceived === false) return "due";
+  // Automatic / unspecified: leave as due until staff settle it
+  return "due";
 }
 
 export async function createCheckIn(input: {
@@ -333,7 +341,12 @@ async function ensureCheckoutCleanTask(roomId: string, roomNumber: string) {
 /** Manual or automatic checkout — frees room, marks dirty, settles payment & bill. */
 export async function checkoutGuest(
   id: string,
-  options?: { at?: string; mode?: "manual" | "automatic" },
+  options?: {
+    at?: string;
+    mode?: "manual" | "automatic";
+    /** When true, bill is marked paid at checkout (cash collected). */
+    paymentReceived?: boolean;
+  },
 ) {
   if (!auth.currentUser) {
     throw new Error("You must be signed in to check out a guest.");
@@ -361,6 +374,13 @@ export async function checkoutGuest(
 
     const paymentTiming =
       (data.paymentTiming as PaymentTiming) || "due_on_checkout";
+    const alreadyPaid =
+      paymentTiming === "paid_at_checkin" || data.paymentStatus === "paid";
+    const paymentReceived =
+      alreadyPaid ||
+      (mode === "manual"
+        ? (options?.paymentReceived ?? true)
+        : (options?.paymentReceived ?? false));
     const bill = calcCheckoutBill(
       Number(data.nightlyRate ?? 0),
       checkInAt,
@@ -376,7 +396,7 @@ export async function checkoutGuest(
       checkedOutAt: actualOut,
       checkoutMode: mode,
       paymentTiming,
-      paymentStatus: paymentStatusOnCheckout(paymentTiming),
+      paymentStatus: paymentStatusOnCheckout(paymentTiming, { paymentReceived }),
       nights: bill.nights,
       roomCharges: bill.roomCharges,
       extraCharges: bill.extraCharges,
@@ -430,6 +450,73 @@ export async function checkoutGuest(
   } finally {
     checkoutLocks.delete(id);
   }
+}
+
+/**
+ * Undo a mistaken check-in (not a real guest departure).
+ * Clears the room without dirtying it or creating a checkout bill.
+ * Restores a reserved booking on the room when one still exists for that room.
+ */
+export async function cancelCheckIn(id: string) {
+  if (!auth.currentUser) {
+    throw new Error("You must be signed in to cancel a check-in.");
+  }
+
+  const ref = doc(db, "checkIns", id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Check-in not found.");
+  const data = snap.data();
+  if (data.status !== "checked_in") {
+    throw new Error("Only an active check-in can be cancelled.");
+  }
+
+  const roomId = String(data.roomId ?? "");
+  const roomNumber = String(data.roomNumber ?? "");
+  const guestName = String(data.guestName ?? "");
+  let restoredBooking: Record<string, unknown> | null = null;
+
+  await updateDoc(ref, {
+    status: "cancelled" satisfies CheckInStatus,
+    updatedAt: serverTimestamp(),
+    cancelledAt: serverTimestamp(),
+    cancelledBy: auth.currentUser.uid,
+  });
+
+  if (roomId) {
+    try {
+      const bq = query(collection(db, "bookingRequests"), where("roomId", "==", roomId));
+      const bsnap = await getDocs(bq);
+      const match = bsnap.docs.find((d) => {
+        const s = String(d.data().status ?? "");
+        return s === "reserved" || s === "confirmed";
+      });
+      if (match) {
+        const b = match.data();
+        restoredBooking = {
+          guestName: String(b.guestName ?? ""),
+          phone: String(b.phone ?? ""),
+          checkIn: String(b.checkInAt ?? ""),
+          checkOut: String(b.checkOutAt ?? ""),
+          source: String(b.channel ?? "booking"),
+          status: "reserved",
+          bookingRequestId: match.id,
+        };
+      }
+    } catch {
+      // Room still frees without booking restore
+    }
+
+    await updateDoc(doc(db, "rooms", roomId), {
+      status: restoredBooking ? "reserved" : "available",
+      guest: null,
+      booking: restoredBooking,
+      cleaningBy: null,
+      openOrders: restoredBooking ? 1 : 0,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  return { roomNumber, guestName, restoredReservation: Boolean(restoredBooking) };
 }
 
 /** Check out any in-house stays whose check-out date/time has passed. */

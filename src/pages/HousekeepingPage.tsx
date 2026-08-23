@@ -1,4 +1,4 @@
-import { Pencil, Plus } from "lucide-react";
+import { Check, Pencil, Plus, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -9,7 +9,7 @@ import { Field, Input, PageHeader, StatCard, TextArea } from "../components/ui/P
 import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
-import { subscribeEmployees, type Employee } from "../services/employees";
+import { subscribeEmployees } from "../services/employees";
 import {
   createHousekeepingTask,
   subscribeHousekeepingTasks,
@@ -19,7 +19,7 @@ import {
   type HousekeepingTaskStatus,
   type HousekeepingTaskType,
 } from "../services/housekeeping";
-import { subscribeRooms, type HotelRoom } from "../services/rooms";
+import { subscribeRooms } from "../services/rooms";
 import { HOUSEKEEPING_TASK_TYPES } from "../types/housekeeping";
 
 const priorityTone: Record<HousekeepingPriority, "danger" | "gold" | "muted"> = {
@@ -32,6 +32,13 @@ const statusTone: Record<HousekeepingTaskStatus, "warning" | "info" | "success">
   pending: "warning",
   in_progress: "info",
   done: "success",
+};
+
+/** Plain-language labels for staff who are not tech-heavy. */
+const statusLabel: Record<HousekeepingTaskStatus, string> = {
+  pending: "Needs cleaning",
+  in_progress: "Cleaning now",
+  done: "Done",
 };
 
 const typeLabel = Object.fromEntries(
@@ -78,7 +85,7 @@ export function HousekeepingPage() {
   const [tasks, setTasks] = useState<HousekeepingTask[]>([]);
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [statusFilter, setStatusFilter] = useState<"open" | "all" | HousekeepingTaskStatus>("all");
+  const [statusFilter, setStatusFilter] = useState<"open" | "all" | HousekeepingTaskStatus>("open");
   const [roomCleanFilter, setRoomCleanFilter] = useState<
     "all" | "clean" | "dirty" | "cleaning_in_progress"
   >("all");
@@ -88,6 +95,12 @@ export function HousekeepingPage() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [actingId, setActingId] = useState<string | null>(null);
+
+  const [assignTask, setAssignTask] = useState<HousekeepingTask | null>(null);
+  const [assignEmployeeId, setAssignEmployeeId] = useState("");
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
 
   useEffect(() => {
     const a = subscribeHousekeepingTasks(setTasks);
@@ -121,17 +134,16 @@ export function HousekeepingPage() {
 
   const filtered = useMemo(() => {
     if (statusFilter === "all") return tasks;
-    if (statusFilter === "open") return tasks.filter((t) => t.status !== "done");
-    return tasks.filter((t) => t.status === statusFilter);
+    if (statusFilter === "open") return tasks.filter((task) => task.status !== "done");
+    return tasks.filter((task) => task.status === statusFilter);
   }, [tasks, statusFilter]);
 
   const stats = useMemo(() => {
-    const open = tasks.filter((t) => t.status !== "done").length;
-    const inProgress = tasks.filter((t) => t.status === "in_progress").length;
-    const unassigned = tasks.filter((t) => t.status !== "done" && !t.assigneeId).length;
+    const open = tasks.filter((task) => task.status !== "done").length;
+    const inProgress = tasks.filter((task) => task.status === "in_progress").length;
     const dirtyRooms = rooms.filter((r) => r.cleaningStatus === "dirty").length;
     const cleanRooms = rooms.filter((r) => r.cleaningStatus === "clean").length;
-    return { open, inProgress, unassigned, dirtyRooms, cleanRooms };
+    return { open, inProgress, dirtyRooms, cleanRooms };
   }, [tasks, rooms]);
 
   const filteredRooms = useMemo(() => {
@@ -171,6 +183,82 @@ export function HousekeepingPage() {
     });
     setFormError(null);
     setModalOpen(true);
+  }
+
+  function openAssign(task: HousekeepingTask) {
+    setAssignTask(task);
+    setAssignEmployeeId(task.assigneeId || "");
+    setAssignError(null);
+  }
+
+  function closeAssign() {
+    if (assignSaving) return;
+    setAssignTask(null);
+    setAssignEmployeeId("");
+    setAssignError(null);
+  }
+
+  async function submitAssign(e: React.FormEvent) {
+    e.preventDefault();
+    if (!assignTask) return;
+    const employee = assigneeOptions.find((a) => a.id === assignEmployeeId);
+    if (!employee) {
+      setAssignError("Pick who will clean this room.");
+      return;
+    }
+
+    setAssignSaving(true);
+    setAssignError(null);
+    try {
+      await updateHousekeepingTask(assignTask.id, {
+        roomId: assignTask.roomId,
+        roomNumber: assignTask.roomNumber,
+        type: assignTask.type,
+        priority: assignTask.priority,
+        status: "in_progress",
+        assigneeId: employee.id,
+        assigneeName: employee.name,
+        dueAt: assignTask.dueAt,
+        notes: assignTask.notes,
+      });
+      toastSuccess(
+        "Assigned",
+        `${employee.name} is cleaning Room ${assignTask.roomNumber}`,
+      );
+      setAssignTask(null);
+      setAssignEmployeeId("");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not assign.";
+      setAssignError(message);
+      toastError("Assign failed", message);
+    } finally {
+      setAssignSaving(false);
+    }
+  }
+
+  async function markDone(task: HousekeepingTask) {
+    setActingId(task.id);
+    try {
+      await updateHousekeepingTask(task.id, {
+        roomId: task.roomId,
+        roomNumber: task.roomNumber,
+        type: task.type,
+        priority: task.priority,
+        status: "done",
+        assigneeId: task.assigneeId,
+        assigneeName: task.assigneeName || "Staff",
+        dueAt: task.dueAt,
+        notes: task.notes,
+      });
+      toastSuccess("Marked done", `Room ${task.roomNumber} is clean`);
+    } catch (err) {
+      toastError(
+        "Could not mark done",
+        err instanceof Error ? err.message : "Try again.",
+      );
+    } finally {
+      setActingId(null);
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -222,18 +310,18 @@ export function HousekeepingPage() {
     <div>
       <PageHeader
         title={t.pages.housekeepingTitle}
-        subtitle="Assign cleaning tasks to employees — room status updates when work starts or finishes."
+        subtitle='Dirty rooms show as “Needs cleaning”. Assign someone to start, then Mark done when finished.'
         actions={
           <>
-            <div className="w-40 shrink-0">
+            <div className="w-44 shrink-0">
               <FancySelect
                 value={statusFilter}
                 onChange={(v) => setStatusFilter(v as typeof statusFilter)}
                 options={[
+                  { value: "open", label: "To do" },
                   { value: "all", label: "All" },
-                  { value: "open", label: "Open tasks" },
-                  { value: "pending", label: "Pending" },
-                  { value: "in_progress", label: "In progress" },
+                  { value: "pending", label: "Needs cleaning" },
+                  { value: "in_progress", label: "Cleaning now" },
                   { value: "done", label: "Done" },
                 ]}
               />
@@ -251,8 +339,8 @@ export function HousekeepingPage() {
       />
 
       <div className="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Open tasks" value={String(stats.open)} />
-        <StatCard label="In progress" value={String(stats.inProgress)} />
+        <StatCard label="To do" value={String(stats.open)} hint="Not finished yet" />
+        <StatCard label="Cleaning now" value={String(stats.inProgress)} />
         <StatCard label="Dirty rooms" value={String(stats.dirtyRooms)} hint="Need cleaning" />
         <StatCard label="Clean rooms" value={String(stats.cleanRooms)} />
       </div>
@@ -310,24 +398,32 @@ export function HousekeepingPage() {
 
       <Card>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="font-bold">Cleaning tasks</p>
+          <div>
+            <p className="font-bold">Cleaning tasks</p>
+            <p className="text-xs text-muted">
+              Use <span className="font-semibold text-app">Assign</span> to give the room to a
+              cleaner, then <span className="font-semibold text-app">Mark done</span> when the room
+              is clean.
+            </p>
+          </div>
         </div>
         <Table
           headers={[
             t.common.room,
             t.common.type,
             "Priority",
-            "Assignee",
+            "Who is cleaning",
             "Due",
             t.status,
             t.common.actions,
           ]}
-          colWidths={["10%", "16%", "12%", "18%", "16%", "14%", "14%"]}
+          colWidths={["9%", "14%", "10%", "16%", "14%", "14%", "23%"]}
         >
           {filtered.length === 0 ? (
             <Tr>
               <Td className="text-muted" colSpan={7}>
-                No housekeeping tasks yet. Add a task and assign it to an employee.
+                No tasks here. When a guest checks out, a “Needs cleaning” task appears — Assign
+                someone, then Mark done.
               </Td>
             </Tr>
           ) : (
@@ -344,31 +440,105 @@ export function HousekeepingPage() {
                   {task.assigneeName ? (
                     task.assigneeName
                   ) : (
-                    <span className="text-muted">Unassigned</span>
+                    <span className="text-muted">Not assigned</span>
                   )}
                 </Td>
                 <Td className="text-muted">{formatDue(task.dueAt)}</Td>
                 <Td>
-                  <Badge tone={statusTone[task.status]}>
-                    {task.status.replace("_", " ")}
-                  </Badge>
+                  <Badge tone={statusTone[task.status]}>{statusLabel[task.status]}</Badge>
                 </Td>
                 <Td>
-                  <Button
-                    size="sm"
-                    variant="gold"
-                    className="cursor-pointer"
-                    icon={<Pencil className="h-3.5 w-3.5" />}
-                    onClick={() => openEdit(task)}
-                  >
-                    Update
-                  </Button>
+                  <div className="flex flex-wrap gap-1.5">
+                    {task.status !== "done" ? (
+                      <Button
+                        size="sm"
+                        variant="gold"
+                        className="cursor-pointer"
+                        icon={<UserPlus className="h-3.5 w-3.5" />}
+                        disabled={actingId === task.id}
+                        onClick={() => openAssign(task)}
+                      >
+                        Assign
+                      </Button>
+                    ) : null}
+                    {task.status !== "done" ? (
+                      <Button
+                        size="sm"
+                        className="cursor-pointer"
+                        icon={<Check className="h-3.5 w-3.5" />}
+                        disabled={actingId === task.id}
+                        onClick={() => void markDone(task)}
+                      >
+                        {actingId === task.id ? "…" : "Mark done"}
+                      </Button>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="cursor-pointer"
+                      icon={<Pencil className="h-3.5 w-3.5" />}
+                      onClick={() => openEdit(task)}
+                    >
+                      Edit
+                    </Button>
+                  </div>
                 </Td>
               </Tr>
             ))
           )}
         </Table>
       </Card>
+
+      <Modal
+        open={Boolean(assignTask)}
+        onClose={closeAssign}
+        title="Assign cleaner"
+        subtitle={
+          assignTask
+            ? `Room ${assignTask.roomNumber} — picking someone starts cleaning (Cleaning now).`
+            : undefined
+        }
+        footer={
+          <>
+            <Button type="button" variant="secondary" disabled={assignSaving} onClick={closeAssign}>
+              Cancel
+            </Button>
+            <Button type="submit" form="hk-assign-form" variant="gold" disabled={assignSaving}>
+              {assignSaving ? "Assigning…" : "Assign & start"}
+            </Button>
+          </>
+        }
+      >
+        <form id="hk-assign-form" className="space-y-4" onSubmit={(e) => void submitAssign(e)}>
+          {assignError ? (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+              {assignError}
+            </p>
+          ) : null}
+          <SelectField label="Who will clean this room?">
+            <FancySelect
+              value={assignEmployeeId}
+              onChange={setAssignEmployeeId}
+              placeholder={
+                assigneeOptions.length ? "Select staff" : "Add employees first"
+              }
+              options={assigneeOptions.map((e) => ({
+                value: e.id,
+                label: `${e.name} · ${e.shift}`,
+              }))}
+            />
+          </SelectField>
+          <p className="text-sm text-muted">
+            After you assign, the task shows as <strong>Cleaning now</strong> and the room is
+            marked cleaning in progress.
+          </p>
+          {!assigneeOptions.length ? (
+            <p className="text-sm text-muted">
+              Tip: add active staff under Employees (Housekeeping) so you can assign them.
+            </p>
+          ) : null}
+        </form>
+      </Modal>
 
       <Modal
         open={modalOpen}
@@ -462,8 +632,8 @@ export function HousekeepingPage() {
                 setForm((p) => ({ ...p, status: status as HousekeepingTaskStatus }))
               }
               options={[
-                { value: "pending", label: "Pending" },
-                { value: "in_progress", label: "In progress" },
+                { value: "pending", label: "Needs cleaning" },
+                { value: "in_progress", label: "Cleaning now" },
                 { value: "done", label: "Done" },
               ]}
             />

@@ -1,4 +1,4 @@
-export type CheckInStatus = "checked_in" | "checked_out";
+export type CheckInStatus = "checked_in" | "checked_out" | "cancelled";
 
 /** When the guest settles the room bill */
 export type PaymentTiming = "paid_at_checkin" | "due_on_checkout";

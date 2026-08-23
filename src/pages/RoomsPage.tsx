@@ -139,6 +139,7 @@ export function RoomsPage() {
   const [checkoutPassword, setCheckoutPassword] = useState("");
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutPaymentPaid, setCheckoutPaymentPaid] = useState(true);
 
   useEffect(() => {
     const unsubRooms = subscribeRooms((next) => {
@@ -241,6 +242,7 @@ export function RoomsPage() {
     }
     setCheckoutPassword("");
     setCheckoutError(null);
+    setCheckoutPaymentPaid(true);
     setCheckoutOpen(true);
   }
 
@@ -261,6 +263,10 @@ export function RoomsPage() {
       const result = await checkoutGuest(activeCheckIn.id, {
         mode: "manual",
         at: new Date().toISOString(),
+        paymentReceived:
+          activeCheckIn.paymentTiming === "paid_at_checkin" ||
+          activeCheckIn.paymentStatus === "paid" ||
+          checkoutPaymentPaid,
       });
       setCheckoutOpen(false);
       setCheckoutPassword("");
@@ -812,6 +818,33 @@ export function RoomsPage() {
                 </p>
               )}
             </div>
+          ) : null}
+          {activeCheckIn ? (
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-app bg-app px-4 py-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-[var(--accent)]"
+                checked={
+                  activeCheckIn.paymentTiming === "paid_at_checkin" ||
+                  activeCheckIn.paymentStatus === "paid" ||
+                  checkoutPaymentPaid
+                }
+                disabled={
+                  activeCheckIn.paymentTiming === "paid_at_checkin" ||
+                  activeCheckIn.paymentStatus === "paid"
+                }
+                onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
+              />
+              <span className="min-w-0 text-sm">
+                <span className="font-bold">Payment paid</span>
+                <span className="mt-0.5 block text-xs text-muted">
+                  {activeCheckIn.paymentTiming === "paid_at_checkin" ||
+                  activeCheckIn.paymentStatus === "paid"
+                    ? "Already paid at check-in."
+                    : "Check if the guest paid now. Uncheck only if payment is still due."}
+                </span>
+              </span>
+            </label>
           ) : null}
           <Field label="Your password">
             <Input

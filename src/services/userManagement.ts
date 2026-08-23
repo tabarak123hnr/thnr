@@ -2,6 +2,8 @@ import {
   createUserWithEmailAndPassword,
   EmailAuthProvider,
   reauthenticateWithCredential,
+  updateEmail,
+  updatePassword,
   updateProfile,
 } from "firebase/auth";
 import {
@@ -173,6 +175,64 @@ export async function confirmCurrentUserPassword(password: string) {
   }
   const credential = EmailAuthProvider.credential(user.email, password);
   await reauthenticateWithCredential(user, credential);
+}
+
+/** Change signed-in user's email after confirming current password. */
+export async function updateCurrentUserEmail(currentPassword: string, newEmail: string) {
+  const user = auth.currentUser;
+  if (!user?.email) {
+    throw new Error("You must be signed in to continue.");
+  }
+  const email = newEmail.trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    throw new Error("Enter a valid email address.");
+  }
+  if (email === user.email.toLowerCase()) {
+    throw new Error("That is already your current email.");
+  }
+
+  await confirmCurrentUserPassword(currentPassword);
+  await updateEmail(user, email);
+
+  try {
+    await updateDoc(doc(db, "users", user.uid), {
+      email,
+      username: email.split("@")[0] || user.email.split("@")[0],
+      updatedAt: serverTimestamp(),
+      updatedBy: user.uid,
+    });
+  } catch {
+    // Auth email updated; profile sync is best-effort
+  }
+}
+
+/** Change signed-in user's password after confirming current password. */
+export async function updateCurrentUserPassword(
+  currentPassword: string,
+  newPassword: string,
+) {
+  const user = auth.currentUser;
+  if (!user?.email) {
+    throw new Error("You must be signed in to continue.");
+  }
+  if (newPassword.length < 6) {
+    throw new Error("New password must be at least 6 characters.");
+  }
+  if (currentPassword === newPassword) {
+    throw new Error("New password must be different from the current password.");
+  }
+
+  await confirmCurrentUserPassword(currentPassword);
+  await updatePassword(user, newPassword);
+
+  try {
+    await updateDoc(doc(db, "users", user.uid), {
+      updatedAt: serverTimestamp(),
+      updatedBy: user.uid,
+    });
+  } catch {
+    // Auth password updated; profile touch is best-effort
+  }
 }
 
 export async function deleteManagedUser(userId: string) {

@@ -13,6 +13,7 @@ import { calcCheckoutBill, calcRoomBill } from "../lib/billing";
 import { uploadImageToCloudinary } from "../lib/cloudinary";
 import { formatRs } from "../lib/utils";
 import {
+  cancelCheckIn,
   checkoutGuest,
   createCheckIn,
   subscribeCheckIns,
@@ -153,19 +154,22 @@ export function CheckInPage() {
 
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
   const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
-  const [filter, setFilter] = useState<"all" | "checked_in" | "checked_out">("all");
+  const [filter, setFilter] = useState<"all" | "checked_in" | "checked_out" | "cancelled">(
+    "checked_in",
+  );
 
   const [mode, setMode] = useState<"create" | "edit" | null>(null);
   const [viewRow, setViewRow] = useState<CheckInRecord | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [lockedRoomId, setLockedRoomId] = useState<string | null>(null);
   const [passwordModal, setPasswordModal] = useState(false);
-  const [secureAction, setSecureAction] = useState<"edit" | "checkout" | null>(null);
+  const [secureAction, setSecureAction] = useState<"edit" | "checkout" | "cancel" | null>(null);
   const [pendingEdit, setPendingEdit] = useState<CheckInRecord | null>(null);
   const [adminPassword, setAdminPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [verifyingPassword, setVerifyingPassword] = useState(false);
   const [checkingOutId, setCheckingOutId] = useState<string | null>(null);
+  const [checkoutPaymentPaid, setCheckoutPaymentPaid] = useState(true);
 
   const [form, setForm] = useState(emptyForm);
   const [companions, setCompanions] = useState<CompanionForm[]>([]);
@@ -204,7 +208,7 @@ export function CheckInPage() {
   );
 
   const filtered = useMemo(() => {
-    if (filter === "all") return checkIns;
+    if (filter === "all") return checkIns.filter((c) => c.status !== "cancelled");
     return checkIns.filter((c) => c.status === filter);
   }, [checkIns, filter]);
 
@@ -350,6 +354,17 @@ export function CheckInPage() {
     setSecureAction("checkout");
     setAdminPassword("");
     setPasswordError(null);
+    setCheckoutPaymentPaid(true);
+    setPasswordModal(true);
+  }
+
+  function requestCancel(row: CheckInRecord) {
+    if (row.status !== "checked_in") return;
+    setViewRow(null);
+    setPendingEdit(row);
+    setSecureAction("cancel");
+    setAdminPassword("");
+    setPasswordError(null);
     setPasswordModal(true);
   }
 
@@ -393,11 +408,41 @@ export function CheckInPage() {
         return;
       }
 
+      if (action === "cancel") {
+        setCheckingOutId(row.id);
+        try {
+          const result = await cancelCheckIn(row.id);
+          setPasswordModal(false);
+          setPendingEdit(null);
+          setSecureAction(null);
+          toastSuccess(
+            "Check-in cancelled",
+            result.restoredReservation
+              ? `${result.guestName} removed · Room ${result.roomNumber} reserved again`
+              : `${result.guestName} removed · Room ${result.roomNumber} available`,
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Cancel failed.";
+          setPasswordError(message);
+          toastError("Cancel failed", message);
+        } finally {
+          setCheckingOutId(null);
+        }
+        return;
+      }
+
       // checkout
       const nowIso = new Date().toISOString();
       setCheckingOutId(row.id);
       try {
-        const result = await checkoutGuest(row.id, { mode: "manual", at: nowIso });
+        const result = await checkoutGuest(row.id, {
+          mode: "manual",
+          at: nowIso,
+          paymentReceived:
+            row.paymentTiming === "paid_at_checkin" ||
+            row.paymentStatus === "paid" ||
+            checkoutPaymentPaid,
+        });
         setPasswordModal(false);
         setPendingEdit(null);
         setSecureAction(null);
@@ -586,9 +631,10 @@ export function CheckInPage() {
                 value={filter}
                 onChange={(v) => setFilter(v as typeof filter)}
                 options={[
-                  { value: "all", label: "All" },
                   { value: "checked_in", label: "Checked in" },
                   { value: "checked_out", label: "Checked out" },
+                  { value: "cancelled", label: "Cancelled" },
+                  { value: "all", label: "All (active)" },
                 ]}
               />
             </div>
@@ -623,8 +669,20 @@ export function CheckInPage() {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-lg font-extrabold">{row.guestName}</p>
-                    <Badge tone={row.status === "checked_in" ? "gold" : "muted"}>
-                      {row.status === "checked_in" ? "Checked in" : "Checked out"}
+                    <Badge
+                      tone={
+                        row.status === "checked_in"
+                          ? "gold"
+                          : row.status === "cancelled"
+                            ? "danger"
+                            : "muted"
+                      }
+                    >
+                      {row.status === "checked_in"
+                        ? "Checked in"
+                        : row.status === "cancelled"
+                          ? "Cancelled"
+                          : "Checked out"}
                     </Badge>
                     {row.paymentTiming === "paid_at_checkin" || row.paymentStatus === "paid" ? (
                       <Badge tone="success">Paid</Badge>
@@ -683,6 +741,17 @@ export function CheckInPage() {
                       >
                         {checkingOutId === row.id ? "Checking out…" : "Check out"}
                       </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="cursor-pointer text-red-600"
+                        icon={<Trash2 className="h-3.5 w-3.5" />}
+                        disabled={checkingOutId === row.id}
+                        onClick={() => requestCancel(row)}
+                      >
+                        Cancel check-in
+                      </Button>
                     </>
                   ) : null}
                 </div>
@@ -724,6 +793,16 @@ export function CheckInPage() {
                   onClick={() => requestCheckout(viewRow)}
                 >
                   {checkingOutId === viewRow.id ? "Checking out…" : "Check out"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-red-600"
+                  icon={<Trash2 className="h-4 w-4" />}
+                  disabled={checkingOutId === viewRow.id}
+                  onClick={() => requestCancel(viewRow)}
+                >
+                  Cancel check-in
                 </Button>
               </>
             ) : null}
@@ -799,11 +878,19 @@ export function CheckInPage() {
       <Modal
         open={passwordModal}
         onClose={closePasswordModal}
-        title={secureAction === "checkout" ? "Confirm check-out" : "Confirm edit"}
+        title={
+          secureAction === "checkout"
+            ? "Confirm check-out"
+            : secureAction === "cancel"
+              ? "Cancel check-in"
+              : "Confirm edit"
+        }
         subtitle={
           secureAction === "checkout"
             ? `Enter your login password to check out ${pendingEdit?.guestName ?? "this guest"}.`
-            : `Enter your login password to edit ${pendingEdit?.guestName ?? "this check-in"}.`
+            : secureAction === "cancel"
+              ? `Undo mistaken check-in for ${pendingEdit?.guestName ?? "this guest"}. Room is freed — no bill or dirty status.`
+              : `Enter your login password to edit ${pendingEdit?.guestName ?? "this check-in"}.`
         }
         footer={
           <>
@@ -818,16 +905,22 @@ export function CheckInPage() {
             <Button
               type="submit"
               form="checkin-password-gate-form"
-              variant={secureAction === "checkout" ? "danger" : "gold"}
+              variant={
+                secureAction === "checkout" || secureAction === "cancel" ? "danger" : "gold"
+              }
               disabled={verifyingPassword || Boolean(checkingOutId)}
             >
               {verifyingPassword || checkingOutId
                 ? secureAction === "checkout"
                   ? "Checking out…"
-                  : "Verifying…"
+                  : secureAction === "cancel"
+                    ? "Cancelling…"
+                    : "Verifying…"
                 : secureAction === "checkout"
                   ? "Verify & check out"
-                  : "Verify & edit"}
+                  : secureAction === "cancel"
+                    ? "Verify & cancel check-in"
+                    : "Verify & edit"}
             </Button>
           </>
         }
@@ -877,6 +970,36 @@ export function CheckInPage() {
               before editing a guest stay.
             </div>
           )}
+
+          {secureAction === "checkout" && pendingEdit ? (
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-app bg-app px-4 py-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-[var(--accent)]"
+                checked={
+                  pendingEdit.paymentTiming === "paid_at_checkin" ||
+                  pendingEdit.paymentStatus === "paid" ||
+                  checkoutPaymentPaid
+                }
+                disabled={
+                  pendingEdit.paymentTiming === "paid_at_checkin" ||
+                  pendingEdit.paymentStatus === "paid"
+                }
+                onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
+              />
+              <span className="min-w-0 text-sm">
+                <span className="font-bold text-app">Payment paid</span>
+                <span className="mt-0.5 block text-xs text-muted">
+                  {pendingEdit.paymentTiming === "paid_at_checkin" ||
+                  pendingEdit.paymentStatus === "paid"
+                    ? "Already paid at check-in — stays marked paid."
+                    : checkoutPaymentPaid
+                      ? "Guest paid at checkout — list will show Paid."
+                      : "Leave unchecked only if payment is still outstanding (Due)."}
+                </span>
+              </span>
+            </label>
+          ) : null}
 
           <Field label="Your password">
             <div className="relative">

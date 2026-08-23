@@ -56,7 +56,10 @@ export function GuestsPage() {
   }, []);
 
   const rows = useMemo(() => {
-    const list = filter === "all" ? checkIns : checkIns.filter((c) => c.status === filter);
+    const list =
+      filter === "all"
+        ? checkIns.filter((c) => c.status !== "cancelled")
+        : checkIns.filter((c) => c.status === filter);
     return list.map((row) => ({ row, bill: resolveBill(row, rooms) }));
   }, [checkIns, rooms, filter]);
 
