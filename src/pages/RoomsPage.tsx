@@ -11,6 +11,10 @@ import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
 import { calcCheckoutBill } from "../lib/billing";
 import { uploadImagesToCloudinary } from "../lib/cloudinary";
+import {
+  resolveAmountPaid,
+  resolveBalanceDue,
+} from "../lib/paymentDisplay";
 import { cn, formatRs } from "../lib/utils";
 import {
   subscribeBookingRequests,
@@ -264,7 +268,7 @@ export function RoomsPage() {
         mode: "manual",
         at: new Date().toISOString(),
         paymentReceived:
-          activeCheckIn.paymentTiming === "paid_at_checkin" ||
+          (activeCheckIn.balanceDue ?? 0) <= 0 ||
           activeCheckIn.paymentStatus === "paid" ||
           checkoutPaymentPaid,
       });
@@ -817,6 +821,28 @@ export function RoomsPage() {
                   {formatRs(checkoutPreview.totalBill, t.common.rs)}
                 </p>
               )}
+              {activeCheckIn ? (
+                <div className="mt-2 space-y-0.5 border-t border-app pt-2 text-xs">
+                  <p className="flex justify-between gap-2">
+                    <span className="text-muted">Already paid</span>
+                    <span className="font-semibold">
+                      {formatRs(resolveAmountPaid(activeCheckIn), t.common.rs)}
+                    </span>
+                  </p>
+                  <p className="flex justify-between gap-2">
+                    <span className="text-muted">Balance due</span>
+                    <span className="font-bold">
+                      {formatRs(
+                        Math.max(
+                          0,
+                          checkoutPreview.totalBill - resolveAmountPaid(activeCheckIn),
+                        ),
+                        t.common.rs,
+                      )}
+                    </span>
+                  </p>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {activeCheckIn ? (
@@ -825,23 +851,25 @@ export function RoomsPage() {
                 type="checkbox"
                 className="mt-1 h-4 w-4 accent-[var(--accent)]"
                 checked={
-                  activeCheckIn.paymentTiming === "paid_at_checkin" ||
+                  resolveBalanceDue(activeCheckIn) <= 0 ||
                   activeCheckIn.paymentStatus === "paid" ||
                   checkoutPaymentPaid
                 }
                 disabled={
-                  activeCheckIn.paymentTiming === "paid_at_checkin" ||
-                  activeCheckIn.paymentStatus === "paid"
+                  resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
                 }
                 onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
               />
               <span className="min-w-0 text-sm">
-                <span className="font-bold">Payment paid</span>
+                <span className="font-bold">
+                  {resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
+                    ? "Payment paid"
+                    : "Remaining balance paid"}
+                </span>
                 <span className="mt-0.5 block text-xs text-muted">
-                  {activeCheckIn.paymentTiming === "paid_at_checkin" ||
-                  activeCheckIn.paymentStatus === "paid"
-                    ? "Already paid at check-in."
-                    : "Check if the guest paid now. Uncheck only if payment is still due."}
+                  {resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
+                    ? "Bill already settled."
+                    : "Check if the guest paid the remaining balance now."}
                 </span>
               </span>
             </label>

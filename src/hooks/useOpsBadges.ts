@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { subscribeHousekeepingTasks } from "../services/housekeeping";
+import { subscribeOrders } from "../services/orders";
 import { subscribeRooms } from "../services/rooms";
 
 export function useOpsBadges() {
   const [roomsBadge, setRoomsBadge] = useState<string | null>(null);
   const [housekeepingBadge, setHousekeepingBadge] = useState<number | null>(null);
+  const [ordersBadge, setOrdersBadge] = useState<number | null>(null);
 
   useEffect(() => {
     const unsubRooms = subscribeRooms((rooms) => {
@@ -22,11 +24,16 @@ export function useOpsBadges() {
       const open = tasks.filter((t) => t.status !== "done").length;
       setHousekeepingBadge(open > 0 ? open : null);
     });
+    const unsubOrders = subscribeOrders((orders) => {
+      const pending = orders.filter((o) => o.status === "pending").length;
+      setOrdersBadge(pending > 0 ? pending : null);
+    });
     return () => {
       unsubRooms();
       unsubTasks();
+      unsubOrders();
     };
   }, []);
 
-  return { roomsBadge, housekeepingBadge };
+  return { roomsBadge, housekeepingBadge, ordersBadge };
 }

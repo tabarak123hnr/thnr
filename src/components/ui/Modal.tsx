@@ -11,6 +11,7 @@ export function Modal({
   children,
   footer,
   wide,
+  xl,
 }: {
   open: boolean;
   title: string;
@@ -19,6 +20,8 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  /** Extra-wide dialog (e.g. invoice preview) */
+  xl?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -49,6 +52,7 @@ export function Modal({
         className={cn(
           "relative z-10 flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-2xl border border-app bg-elevated shadow-[var(--shadow)]",
           wide ? "max-w-2xl" : "max-w-lg",
+          xl && "max-w-4xl",
         )}
       >
         <div className="flex items-start justify-between gap-3 border-b border-app px-5 py-4">

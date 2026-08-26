@@ -266,7 +266,7 @@ export function EmployeesPage() {
                   <div className="flex flex-wrap gap-1.5">
                     <Button
                       size="sm"
-                      className="cursor-pointer !bg-sky-600 !text-white hover:!opacity-90"
+                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
                       icon={<Eye className="h-3.5 w-3.5" />}
                       onClick={() => setViewRow(emp)}
                     >

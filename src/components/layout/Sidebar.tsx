@@ -51,7 +51,7 @@ const icons: Record<string, LucideIcon> = {
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useApp();
   const { profile, user, logout, role, hasPermission } = useAuth();
-  const { roomsBadge, housekeepingBadge } = useOpsBadges();
+  const { roomsBadge, housekeepingBadge, ordersBadge } = useOpsBadges();
 
   const displayName = profile?.name || user?.displayName || "Staff";
   const roleLabel = role || profile?.roleName || t.roles.admin;
@@ -77,6 +77,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   function resolveBadge(itemId: string, fallback?: number | string) {
     if (itemId === "rooms") return roomsBadge;
     if (itemId === "housekeeping") return housekeepingBadge;
+    if (itemId === "orders") return ordersBadge;
     return fallback ?? null;
   }
 

@@ -28,7 +28,7 @@ export function subscribeRooms(onData: (rooms: HotelRoom[]) => void): Unsubscrib
           id: d.id,
           number: String(data.number ?? ""),
           floor: Number(data.floor ?? 1),
-          type: String(data.type ?? "Standard Double"),
+          type: String(data.type ?? "Normal"),
           typeUr: data.typeUr ? String(data.typeUr) : undefined,
           rate: Number(data.rate ?? 0),
           capacity: Number(data.capacity ?? 2),
