@@ -90,7 +90,6 @@ export const navigation: NavSection[] = [
         icon: "ClipboardList",
         labelKey: "orders",
         permission: "orders",
-        badge: 9,
         badgeTone: "info",
       },
       {

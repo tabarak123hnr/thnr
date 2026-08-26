@@ -24,7 +24,10 @@ export interface RoomGuestInfo {
   companions?: RoomGuestCompanion[];
   checkIn: string;
   checkOut: string;
+  email?: string;
   cnicImageUrl?: string | null;
+  cnicFrontImageUrl?: string | null;
+  cnicBackImageUrl?: string | null;
   checkInId?: string;
   notes?: string;
 }
@@ -64,8 +67,7 @@ export interface HotelRoom {
 }
 
 export const ROOM_TYPES = [
-  { value: "Standard Double", label: "Standard Double", labelUr: "اسٹینڈرڈ ڈبل" },
-  { value: "Deluxe Twin", label: "Deluxe Twin", labelUr: "ڈیلکس ٹوئن" },
-  { value: "Family Suite", label: "Family Suite", labelUr: "فیملی سوئٹ" },
-  { value: "Executive", label: "Executive", labelUr: "ایگزیکٹو" },
+  { value: "Normal", label: "Normal", labelUr: "نارمل" },
+  { value: "Studio", label: "Studio", labelUr: "اسٹوڈیو" },
+  { value: "VIP", label: "VIP", labelUr: "وی آئی پی" },
 ] as const;

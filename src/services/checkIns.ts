@@ -21,6 +21,7 @@ import type {
   PaymentStatus,
   PaymentTiming,
 } from "../types/checkIn";
+import { resolvePaymentSplit } from "../types/checkIn";
 
 export type {
   CheckInCompanion,
@@ -29,6 +30,7 @@ export type {
   PaymentStatus,
   PaymentTiming,
 };
+export { resolvePaymentSplit };
 
 const checkoutLocks = new Set<string>();
 
@@ -55,9 +57,21 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
     (data.paymentTiming as PaymentTiming) ||
     (data.paymentStatus === "paid" ? "paid_at_checkin" : "due_on_checkout");
 
-  let paymentStatus = (data.paymentStatus as PaymentStatus) || "pending";
+  const totalBill = Number(data.totalBill ?? computed?.totalBill ?? 0);
+  const storedPaid = Number(data.amountPaid ?? NaN);
+  const split = resolvePaymentSplit(
+    totalBill,
+    paymentTiming,
+    Number.isFinite(storedPaid)
+      ? storedPaid
+      : paymentTiming === "paid_at_checkin"
+        ? totalBill
+        : 0,
+  );
+
+  let paymentStatus = (data.paymentStatus as PaymentStatus) || split.paymentStatus;
   if (!data.paymentStatus) {
-    paymentStatus = paymentTiming === "paid_at_checkin" ? "paid" : "pending";
+    paymentStatus = split.paymentStatus;
   }
 
   return {
@@ -74,16 +88,31 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
     companions,
     checkInAt,
     checkOutAt,
-    cnicImageUrl: data.cnicImageUrl ? String(data.cnicImageUrl) : null,
+    email: String(data.email ?? ""),
+    cnicImageUrl: data.cnicImageUrl
+      ? String(data.cnicImageUrl)
+      : data.cnicFrontImageUrl
+        ? String(data.cnicFrontImageUrl)
+        : null,
+    cnicFrontImageUrl: data.cnicFrontImageUrl
+      ? String(data.cnicFrontImageUrl)
+      : data.cnicImageUrl
+        ? String(data.cnicImageUrl)
+        : null,
+    cnicBackImageUrl: data.cnicBackImageUrl ? String(data.cnicBackImageUrl) : null,
     notes: String(data.notes ?? ""),
     status: (data.status as CheckInStatus) || "checked_in",
-    paymentTiming,
+    paymentTiming: (data.paymentTiming as PaymentTiming) || split.paymentTiming,
     paymentStatus,
+    amountPaid: Number.isFinite(storedPaid) ? Math.max(0, storedPaid) : split.amountPaid,
+    balanceDue: Number.isFinite(Number(data.balanceDue))
+      ? Math.max(0, Number(data.balanceDue))
+      : split.balanceDue,
     nightlyRate: computed?.nightlyRate ?? nightlyRate,
     nights: Number(data.nights ?? computed?.nights ?? 0),
     roomCharges: Number(data.roomCharges ?? computed?.roomCharges ?? 0),
     extraCharges,
-    totalBill: Number(data.totalBill ?? computed?.totalBill ?? 0),
+    totalBill,
     checkedOutAt: data.checkedOutAt ? String(data.checkedOutAt) : null,
     checkoutMode: (data.checkoutMode as CheckInRecord["checkoutMode"]) ?? null,
     plannedCheckOutAt: data.plannedCheckOutAt
@@ -108,6 +137,13 @@ export function subscribeCheckIns(
   );
 }
 
+/** One-shot fetch (e.g. manual refresh from another browser’s changes). */
+export async function fetchCheckIns(): Promise<CheckInRecord[]> {
+  const q = query(collection(db, "checkIns"), orderBy("checkInAt", "desc"));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => mapCheckIn(d.id, d.data() as Record<string, unknown>));
+}
+
 function normalizeCompanions(list: CheckInCompanion[]) {
   return list
     .map((c) => ({
@@ -119,19 +155,13 @@ function normalizeCompanions(list: CheckInCompanion[]) {
     .filter((c) => c.name.length > 0);
 }
 
-function paymentStatusForCreate(timing: PaymentTiming): PaymentStatus {
-  return timing === "paid_at_checkin" ? "paid" : "pending";
-}
-
 function paymentStatusOnCheckout(
-  timing: PaymentTiming,
+  balanceDue: number,
   options?: { paymentReceived?: boolean },
 ): PaymentStatus {
-  if (timing === "paid_at_checkin") return "paid";
-  // Manual checkout: staff confirm cash received via checkbox (default paid).
+  if (balanceDue <= 0) return "paid";
   if (options?.paymentReceived === true) return "paid";
   if (options?.paymentReceived === false) return "due";
-  // Automatic / unspecified: leave as due until staff settle it
   return "due";
 }
 
@@ -149,10 +179,15 @@ export async function createCheckIn(input: {
   checkInAt: string;
   checkOutAt: string;
   cnicImageUrl: string | null;
+  cnicFrontImageUrl?: string | null;
+  cnicBackImageUrl?: string | null;
+  email?: string;
   notes: string;
   nightlyRate: number;
   extraCharges?: number;
   paymentTiming: PaymentTiming;
+  /** Cash collected at check-in (required when timing is partial) */
+  amountPaidAtCheckIn?: number;
 }) {
   if (!auth.currentUser) {
     throw new Error("You must be signed in to check in a guest.");
@@ -165,14 +200,29 @@ export async function createCheckIn(input: {
     input.checkOutAt,
     input.extraCharges ?? 0,
   );
-  const paymentTiming = input.paymentTiming;
-  const paymentStatus = paymentStatusForCreate(paymentTiming);
+  const split = resolvePaymentSplit(
+    bill.totalBill,
+    input.paymentTiming,
+    input.amountPaidAtCheckIn,
+  );
+
+  if (input.paymentTiming === "partial") {
+    if (!(input.amountPaidAtCheckIn != null && input.amountPaidAtCheckIn > 0)) {
+      throw new Error("Enter how much cash was paid at check-in.");
+    }
+  }
+
+  const email = (input.email ?? "").trim().toLowerCase();
+  const cnicFront =
+    input.cnicFrontImageUrl ?? input.cnicImageUrl ?? null;
+  const cnicBack = input.cnicBackImageUrl ?? null;
 
   const checkInRef = await addDoc(collection(db, "checkIns"), {
     roomId: input.roomId,
     roomNumber: input.roomNumber,
     guestName: input.guestName.trim(),
     phone: input.phone.trim(),
+    email,
     cnic: input.cnic.trim(),
     nationality: input.nationality.trim() || "Pakistan",
     purpose: input.purpose,
@@ -182,11 +232,15 @@ export async function createCheckIn(input: {
     checkInAt: input.checkInAt,
     checkOutAt: input.checkOutAt,
     plannedCheckOutAt: input.checkOutAt,
-    cnicImageUrl: input.cnicImageUrl,
+    cnicImageUrl: cnicFront,
+    cnicFrontImageUrl: cnicFront,
+    cnicBackImageUrl: cnicBack,
     notes: input.notes.trim(),
     status: "checked_in" satisfies CheckInStatus,
-    paymentTiming,
-    paymentStatus,
+    paymentTiming: split.paymentTiming,
+    paymentStatus: split.paymentStatus,
+    amountPaid: split.amountPaid,
+    balanceDue: split.balanceDue,
     nightlyRate: bill.nightlyRate,
     nights: bill.nights,
     roomCharges: bill.roomCharges,
@@ -205,6 +259,7 @@ export async function createCheckIn(input: {
     guest: {
       name: input.guestName.trim(),
       phone: input.phone.trim(),
+      email,
       cnic: input.cnic.trim(),
       nationality: input.nationality.trim() || "Pakistan",
       adults: input.adults,
@@ -212,7 +267,9 @@ export async function createCheckIn(input: {
       companions,
       checkIn: input.checkInAt,
       checkOut: input.checkOutAt,
-      cnicImageUrl: input.cnicImageUrl,
+      cnicImageUrl: cnicFront,
+      cnicFrontImageUrl: cnicFront,
+      cnicBackImageUrl: cnicBack,
       checkInId: checkInRef.id,
       notes: input.notes.trim(),
     },
@@ -242,7 +299,11 @@ export async function updateCheckIn(
     nightlyRate: number;
     extraCharges?: number;
     cnicImageUrl?: string | null;
+    cnicFrontImageUrl?: string | null;
+    cnicBackImageUrl?: string | null;
+    email?: string;
     paymentTiming?: PaymentTiming;
+    amountPaidAtCheckIn?: number;
   },
 ) {
   if (!auth.currentUser) {
@@ -257,9 +318,31 @@ export async function updateCheckIn(
     input.extraCharges ?? 0,
   );
 
+  const existing = await getDoc(doc(db, "checkIns", id));
+  const existingData = existing.data();
+  const timing =
+    input.paymentTiming ||
+    (existingData?.paymentTiming as PaymentTiming) ||
+    "due_on_checkout";
+  const paidInput =
+    input.amountPaidAtCheckIn != null
+      ? input.amountPaidAtCheckIn
+      : Number(existingData?.amountPaid ?? 0);
+  const split = resolvePaymentSplit(bill.totalBill, timing, paidInput);
+  const email = (input.email ?? existingData?.email ?? "").toString().trim().toLowerCase();
+  const cnicFront =
+    input.cnicFrontImageUrl !== undefined
+      ? input.cnicFrontImageUrl
+      : input.cnicImageUrl !== undefined
+        ? input.cnicImageUrl
+        : undefined;
+  const cnicBack =
+    input.cnicBackImageUrl !== undefined ? input.cnicBackImageUrl : undefined;
+
   const patch: Record<string, unknown> = {
     guestName: input.guestName.trim(),
     phone: input.phone.trim(),
+    email,
     cnic: input.cnic.trim(),
     nationality: input.nationality.trim() || "Pakistan",
     purpose: input.purpose,
@@ -270,7 +353,6 @@ export async function updateCheckIn(
     checkOutAt: input.checkOutAt,
     plannedCheckOutAt: input.checkOutAt,
     notes: input.notes.trim(),
-    ...(input.cnicImageUrl !== undefined ? { cnicImageUrl: input.cnicImageUrl } : {}),
     nightlyRate: bill.nightlyRate,
     nights: bill.nights,
     roomCharges: bill.roomCharges,
@@ -279,13 +361,19 @@ export async function updateCheckIn(
     updatedAt: serverTimestamp(),
   };
 
-  if (input.paymentTiming) {
-    patch.paymentTiming = input.paymentTiming;
-    const existing = await getDoc(doc(db, "checkIns", id));
-    const status = existing.data()?.status;
-    if (status === "checked_in") {
-      patch.paymentStatus = paymentStatusForCreate(input.paymentTiming);
-    }
+  if (cnicFront !== undefined) {
+    patch.cnicImageUrl = cnicFront;
+    patch.cnicFrontImageUrl = cnicFront;
+  }
+  if (cnicBack !== undefined) {
+    patch.cnicBackImageUrl = cnicBack;
+  }
+
+  if (existingData?.status === "checked_in") {
+    patch.paymentTiming = split.paymentTiming;
+    patch.paymentStatus = split.paymentStatus;
+    patch.amountPaid = split.amountPaid;
+    patch.balanceDue = split.balanceDue;
   }
 
   await updateDoc(doc(db, "checkIns", id), patch);
@@ -294,6 +382,7 @@ export async function updateCheckIn(
     guest: {
       name: input.guestName.trim(),
       phone: input.phone.trim(),
+      email,
       cnic: input.cnic.trim(),
       nationality: input.nationality.trim() || "Pakistan",
       adults: input.adults,
@@ -303,7 +392,10 @@ export async function updateCheckIn(
       checkOut: input.checkOutAt,
       checkInId: id,
       notes: input.notes.trim(),
-      ...(input.cnicImageUrl !== undefined ? { cnicImageUrl: input.cnicImageUrl } : {}),
+      ...(cnicFront !== undefined
+        ? { cnicImageUrl: cnicFront, cnicFrontImageUrl: cnicFront }
+        : {}),
+      ...(cnicBack !== undefined ? { cnicBackImageUrl: cnicBack } : {}),
     },
     updatedAt: serverTimestamp(),
   });
@@ -374,13 +466,7 @@ export async function checkoutGuest(
 
     const paymentTiming =
       (data.paymentTiming as PaymentTiming) || "due_on_checkout";
-    const alreadyPaid =
-      paymentTiming === "paid_at_checkin" || data.paymentStatus === "paid";
-    const paymentReceived =
-      alreadyPaid ||
-      (mode === "manual"
-        ? (options?.paymentReceived ?? true)
-        : (options?.paymentReceived ?? false));
+    const priorPaid = Math.max(0, Number(data.amountPaid ?? 0));
     const bill = calcCheckoutBill(
       Number(data.nightlyRate ?? 0),
       checkInAt,
@@ -389,14 +475,41 @@ export async function checkoutGuest(
       Number(data.extraCharges ?? 0),
     );
 
+    // Keep cash already collected; clamp if early leave lowered the bill
+    const amountPaidBeforeCheckout = Math.min(priorPaid, bill.totalBill);
+    const balanceBeforeCollect = Math.max(0, bill.totalBill - amountPaidBeforeCheckout);
+    const alreadySettled = balanceBeforeCollect <= 0;
+    const paymentReceived =
+      alreadySettled ||
+      (mode === "manual"
+        ? (options?.paymentReceived ?? true)
+        : (options?.paymentReceived ?? false));
+
+    const amountPaid = paymentReceived ? bill.totalBill : amountPaidBeforeCheckout;
+    const balanceDue = Math.max(0, bill.totalBill - amountPaid);
+    const paymentStatus = paymentStatusOnCheckout(balanceDue, {
+      paymentReceived: alreadySettled ? true : paymentReceived,
+    });
+
     await updateDoc(ref, {
       status: "checked_out",
       checkOutAt: actualOut,
       plannedCheckOutAt: plannedOut,
       checkedOutAt: actualOut,
       checkoutMode: mode,
-      paymentTiming,
-      paymentStatus: paymentStatusOnCheckout(paymentTiming, { paymentReceived }),
+      paymentTiming:
+        balanceDue <= 0
+          ? amountPaidBeforeCheckout > 0 && amountPaidBeforeCheckout < bill.totalBill
+            ? "partial"
+            : paymentTiming === "due_on_checkout" && amountPaidBeforeCheckout <= 0
+              ? "due_on_checkout"
+              : "paid_at_checkin"
+          : priorPaid > 0
+            ? "partial"
+            : paymentTiming,
+      paymentStatus,
+      amountPaid,
+      balanceDue,
       nights: bill.nights,
       roomCharges: bill.roomCharges,
       extraCharges: bill.extraCharges,
@@ -446,6 +559,9 @@ export async function checkoutGuest(
       early: bill.early,
       roomNumber,
       guestName: String(data.guestName ?? ""),
+      amountPaid,
+      balanceDue,
+      paymentStatus,
     };
   } finally {
     checkoutLocks.delete(id);
@@ -517,6 +633,56 @@ export async function cancelCheckIn(id: string) {
   }
 
   return { roomNumber, guestName, restoredReservation: Boolean(restoredBooking) };
+}
+
+/**
+ * Add/subtract food (or other) charges on an in-house stay.
+ * Keeps amountPaid as-is and updates balance / payment status.
+ */
+export async function adjustCheckInExtraCharges(checkInId: string, delta: number) {
+  if (!auth.currentUser) {
+    throw new Error("You must be signed in.");
+  }
+  if (!checkInId || !delta) return;
+
+  const ref = doc(db, "checkIns", checkInId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    throw new Error("Check-in not found for this order.");
+  }
+
+  const data = snap.data();
+  const checkInAt = String(data.checkInAt ?? "");
+  const checkOutAt = String(data.checkOutAt ?? "");
+  const nightlyRate = Number(data.nightlyRate ?? 0);
+  const nextExtra = Math.max(0, Number(data.extraCharges ?? 0) + delta);
+  const bill = calcRoomBill(nightlyRate, checkInAt, checkOutAt, nextExtra);
+
+  const amountPaid = Math.max(0, Number(data.amountPaid ?? 0));
+  const balanceDue = Math.max(0, bill.totalBill - amountPaid);
+  const paymentStatus: PaymentStatus =
+    balanceDue <= 0 ? "paid" : amountPaid > 0 ? "partial" : "due";
+
+  let paymentTiming = (data.paymentTiming as PaymentTiming) || "due_on_checkout";
+  if (balanceDue <= 0) {
+    paymentTiming = "paid_at_checkin";
+  } else if (amountPaid > 0) {
+    paymentTiming = "partial";
+  } else if (paymentTiming === "paid_at_checkin") {
+    paymentTiming = "due_on_checkout";
+  }
+
+  await updateDoc(ref, {
+    nights: bill.nights,
+    roomCharges: bill.roomCharges,
+    extraCharges: bill.extraCharges,
+    totalBill: bill.totalBill,
+    amountPaid,
+    balanceDue,
+    paymentStatus,
+    paymentTiming,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 /** Check out any in-house stays whose check-out date/time has passed. */

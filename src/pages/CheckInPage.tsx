@@ -11,6 +11,18 @@ import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
 import { calcCheckoutBill, calcRoomBill } from "../lib/billing";
 import { uploadImageToCloudinary } from "../lib/cloudinary";
+import {
+  isGuestEmailConfigured,
+  sendGuestCheckInEmail,
+} from "../lib/guestEmail";
+import {
+  paymentBadge,
+  paymentPlanLabel,
+  paymentSplitLine,
+  paymentStatusLabel,
+  resolveAmountPaid,
+  resolveBalanceDue,
+} from "../lib/paymentDisplay";
 import { formatRs } from "../lib/utils";
 import {
   cancelCheckIn,
@@ -35,13 +47,18 @@ const PURPOSE_OPTIONS = [
 const PAYMENT_OPTIONS: { value: PaymentTiming; label: string; description: string }[] = [
   {
     value: "paid_at_checkin",
-    label: "Paid cash at check-in",
-    description: "Marked paid now. Bill still tracked for records.",
+    label: "Paid full cash at check-in",
+    description: "Entire bill collected now.",
+  },
+  {
+    value: "partial",
+    label: "Partial — some now, rest later",
+    description: "Guest pays some cash at check-in; balance due on checkout.",
   },
   {
     value: "due_on_checkout",
-    label: "Pay on checkout",
-    description: "Payment becomes due when the guest checks out.",
+    label: "Pay full on checkout",
+    description: "Nothing collected now; full bill when they leave.",
   },
 ];
 
@@ -108,6 +125,7 @@ function emptyForm() {
   return {
     guestName: "",
     phone: "",
+    email: "",
     cnic: "",
     nationality: "Pakistan",
     purpose: "leisure",
@@ -118,6 +136,7 @@ function emptyForm() {
     checkOutAt: defaultCheckOut(),
     notes: "",
     paymentTiming: "due_on_checkout" as PaymentTiming,
+    amountPaidAtCheckIn: "",
   };
 }
 
@@ -126,12 +145,24 @@ function BillSummary({
   nightlyRate,
   totalBill,
   rs,
+  paymentTiming,
+  amountPaidAtCheckIn,
 }: {
   nights: number;
   nightlyRate: number;
   totalBill: number;
   rs: string;
+  paymentTiming: PaymentTiming;
+  amountPaidAtCheckIn: number;
 }) {
+  const paid =
+    paymentTiming === "paid_at_checkin"
+      ? totalBill
+      : paymentTiming === "partial"
+        ? Math.min(totalBill, Math.max(0, amountPaidAtCheckIn))
+        : 0;
+  const due = Math.max(0, totalBill - paid);
+
   return (
     <div className="rounded-2xl border border-[color-mix(in_oklab,var(--accent)_40%,var(--border))] bg-accent-soft px-4 py-3">
       <p className="text-xs font-bold uppercase tracking-wide text-[var(--accent)]">Room bill</p>
@@ -141,6 +172,20 @@ function BillSummary({
       <p className="mt-1 text-xl font-extrabold text-[var(--accent)]">
         {formatRs(totalBill, rs)}
       </p>
+      {paymentTiming !== "due_on_checkout" || paid > 0 ? (
+        <div className="mt-2 space-y-0.5 border-t border-[color-mix(in_oklab,var(--accent)_25%,transparent)] pt-2 text-sm">
+          <p className="flex justify-between gap-3">
+            <span className="text-muted">Paid at check-in</span>
+            <span className="font-semibold">{formatRs(paid, rs)}</span>
+          </p>
+          <p className="flex justify-between gap-3">
+            <span className="text-muted">Due on checkout</span>
+            <span className="font-bold text-app">{formatRs(due, rs)}</span>
+          </p>
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-muted">Full amount due when the guest checks out.</p>
+      )}
     </div>
   );
 }
@@ -150,7 +195,8 @@ export function CheckInPage() {
   const { success: toastSuccess, error: toastError } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
-  const cnicFileRef = useRef<HTMLInputElement>(null);
+  const cnicFrontRef = useRef<HTMLInputElement>(null);
+  const cnicBackRef = useRef<HTMLInputElement>(null);
 
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
   const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
@@ -173,9 +219,12 @@ export function CheckInPage() {
 
   const [form, setForm] = useState(emptyForm);
   const [companions, setCompanions] = useState<CompanionForm[]>([]);
-  const [cnicFile, setCnicFile] = useState<File | null>(null);
-  const [cnicPreview, setCnicPreview] = useState<string | null>(null);
-  const [existingCnicUrl, setExistingCnicUrl] = useState<string | null>(null);
+  const [cnicFrontFile, setCnicFrontFile] = useState<File | null>(null);
+  const [cnicBackFile, setCnicBackFile] = useState<File | null>(null);
+  const [cnicFrontPreview, setCnicFrontPreview] = useState<string | null>(null);
+  const [cnicBackPreview, setCnicBackPreview] = useState<string | null>(null);
+  const [existingCnicFrontUrl, setExistingCnicFrontUrl] = useState<string | null>(null);
+  const [existingCnicBackUrl, setExistingCnicBackUrl] = useState<string | null>(null);
   const [nightlyRate, setNightlyRate] = useState(0);
   const [extraCharges, setExtraCharges] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -192,9 +241,10 @@ export function CheckInPage() {
 
   useEffect(() => {
     return () => {
-      if (cnicPreview) URL.revokeObjectURL(cnicPreview);
+      if (cnicFrontPreview) URL.revokeObjectURL(cnicFrontPreview);
+      if (cnicBackPreview) URL.revokeObjectURL(cnicBackPreview);
     };
-  }, [cnicPreview]);
+  }, [cnicFrontPreview, cnicBackPreview]);
 
   const availableRooms = useMemo(
     () =>
@@ -236,10 +286,14 @@ export function CheckInPage() {
   const formOpen = mode === "create" || mode === "edit";
 
   function resetMedia() {
-    if (cnicPreview) URL.revokeObjectURL(cnicPreview);
-    setCnicFile(null);
-    setCnicPreview(null);
-    setExistingCnicUrl(null);
+    if (cnicFrontPreview) URL.revokeObjectURL(cnicFrontPreview);
+    if (cnicBackPreview) URL.revokeObjectURL(cnicBackPreview);
+    setCnicFrontFile(null);
+    setCnicBackFile(null);
+    setCnicFrontPreview(null);
+    setCnicBackPreview(null);
+    setExistingCnicFrontUrl(null);
+    setExistingCnicBackUrl(null);
   }
 
   function openCreate() {
@@ -311,6 +365,7 @@ export function CheckInPage() {
     setForm({
       guestName: row.guestName,
       phone: row.phone,
+      email: row.email || "",
       cnic: row.cnic,
       nationality: row.nationality || "Pakistan",
       purpose: row.purpose || "leisure",
@@ -321,6 +376,12 @@ export function CheckInPage() {
       checkOutAt: isoToLocalInput(row.checkOutAt),
       notes: row.notes || "",
       paymentTiming: row.paymentTiming || "due_on_checkout",
+      amountPaidAtCheckIn:
+        row.paymentTiming === "partial" || (row.amountPaid > 0 && row.balanceDue > 0)
+          ? String(row.amountPaid || "")
+          : row.paymentTiming === "paid_at_checkin"
+            ? String(row.totalBill || "")
+            : "",
     });
     setCompanions(
       row.companions.map((c) => ({
@@ -332,7 +393,8 @@ export function CheckInPage() {
     );
     setNightlyRate(row.nightlyRate || rooms.find((r) => r.id === row.roomId)?.rate || 0);
     setExtraCharges(row.extraCharges || 0);
-    setExistingCnicUrl(row.cnicImageUrl);
+    setExistingCnicFrontUrl(row.cnicFrontImageUrl || row.cnicImageUrl);
+    setExistingCnicBackUrl(row.cnicBackImageUrl);
     setFormError(null);
     setEditingId(row.id);
     setLockedRoomId(row.roomId);
@@ -354,7 +416,12 @@ export function CheckInPage() {
     setSecureAction("checkout");
     setAdminPassword("");
     setPasswordError(null);
-    setCheckoutPaymentPaid(true);
+    setCheckoutPaymentPaid(
+      resolveBalanceDue(row) <= 0 || row.paymentStatus === "paid",
+    );
+    if (resolveBalanceDue(row) > 0 && row.paymentStatus !== "paid") {
+      setCheckoutPaymentPaid(true);
+    }
     setPasswordModal(true);
   }
 
@@ -439,7 +506,7 @@ export function CheckInPage() {
           mode: "manual",
           at: nowIso,
           paymentReceived:
-            row.paymentTiming === "paid_at_checkin" ||
+            resolveBalanceDue(row) <= 0 ||
             row.paymentStatus === "paid" ||
             checkoutPaymentPaid,
         });
@@ -470,15 +537,16 @@ export function CheckInPage() {
     }
   }
 
-  function onPickCnic(file: File | null) {
-    if (cnicPreview) URL.revokeObjectURL(cnicPreview);
-    if (!file) {
-      setCnicFile(null);
-      setCnicPreview(null);
-      return;
+  function onPickCnic(side: "front" | "back", file: File | null) {
+    if (side === "front") {
+      if (cnicFrontPreview) URL.revokeObjectURL(cnicFrontPreview);
+      setCnicFrontFile(file);
+      setCnicFrontPreview(file ? URL.createObjectURL(file) : null);
+    } else {
+      if (cnicBackPreview) URL.revokeObjectURL(cnicBackPreview);
+      setCnicBackFile(file);
+      setCnicBackPreview(file ? URL.createObjectURL(file) : null);
     }
-    setCnicFile(file);
-    setCnicPreview(URL.createObjectURL(file));
   }
 
   function addCompanion() {
@@ -513,6 +581,10 @@ export function CheckInPage() {
       setFormError("Phone number is required.");
       return;
     }
+    if (!form.email.trim() || !form.email.includes("@")) {
+      setFormError("Guest email is required so we can send the check-in confirmation.");
+      return;
+    }
     if (!form.roomId || !room) {
       setFormError("Select an available room.");
       return;
@@ -531,13 +603,29 @@ export function CheckInPage() {
     const rate = nightlyRate || room.rate;
     const checkInAt = new Date(form.checkInAt).toISOString();
     const checkOutAt = new Date(form.checkOutAt).toISOString();
+    const amountPaidAtCheckIn = Number(form.amountPaidAtCheckIn) || 0;
+
+    if (form.paymentTiming === "partial") {
+      if (amountPaidAtCheckIn <= 0) {
+        setFormError("Enter how much cash the guest paid at check-in.");
+        return;
+      }
+      if (liveBill.totalBill > 0 && amountPaidAtCheckIn > liveBill.totalBill) {
+        setFormError("Amount paid cannot be more than the total bill.");
+        return;
+      }
+    }
 
     setSaving(true);
     setFormError(null);
     try {
-      let cnicImageUrl: string | null | undefined = existingCnicUrl;
-      if (cnicFile) {
-        cnicImageUrl = await uploadImageToCloudinary(cnicFile, "tabarak/checkins");
+      let cnicFrontUrl: string | null | undefined = existingCnicFrontUrl;
+      let cnicBackUrl: string | null | undefined = existingCnicBackUrl;
+      if (cnicFrontFile) {
+        cnicFrontUrl = await uploadImageToCloudinary(cnicFrontFile, "tabarak/checkins");
+      }
+      if (cnicBackFile) {
+        cnicBackUrl = await uploadImageToCloudinary(cnicBackFile, "tabarak/checkins");
       }
 
       const companionPayload: CheckInCompanion[] =
@@ -550,11 +638,19 @@ export function CheckInPage() {
             }))
           : [];
 
+      const paidNow =
+        form.paymentTiming === "paid_at_checkin"
+          ? liveBill.totalBill
+          : form.paymentTiming === "partial"
+            ? amountPaidAtCheckIn
+            : 0;
+
       if (mode === "edit" && editingId) {
         await updateCheckIn(editingId, {
           roomId: room.id,
           guestName: form.guestName,
           phone: form.phone,
+          email: form.email,
           cnic: form.cnic,
           nationality: form.nationality,
           purpose: form.purpose,
@@ -566,8 +662,11 @@ export function CheckInPage() {
           notes: form.notes,
           nightlyRate: rate,
           extraCharges,
-          cnicImageUrl: cnicImageUrl ?? null,
+          cnicFrontImageUrl: cnicFrontUrl ?? null,
+          cnicBackImageUrl: cnicBackUrl ?? null,
+          cnicImageUrl: cnicFrontUrl ?? null,
           paymentTiming: form.paymentTiming,
+          amountPaidAtCheckIn: paidNow,
         });
         toastSuccess("Check-in updated", `Bill is now ${formatRs(liveBill.totalBill, t.common.rs)}`);
       } else {
@@ -576,6 +675,7 @@ export function CheckInPage() {
           roomNumber: room.number,
           guestName: form.guestName,
           phone: form.phone,
+          email: form.email,
           cnic: form.cnic,
           nationality: form.nationality,
           purpose: form.purpose,
@@ -584,16 +684,65 @@ export function CheckInPage() {
           companions: companionPayload,
           checkInAt,
           checkOutAt,
-          cnicImageUrl: cnicImageUrl ?? null,
+          cnicImageUrl: cnicFrontUrl ?? null,
+          cnicFrontImageUrl: cnicFrontUrl ?? null,
+          cnicBackImageUrl: cnicBackUrl ?? null,
           notes: form.notes,
           nightlyRate: rate,
           extraCharges,
           paymentTiming: form.paymentTiming,
+          amountPaidAtCheckIn: paidNow,
         });
-        toastSuccess(
-          "Checked in",
-          `${form.guestName.trim()} → Room ${room.number} · ${formatRs(liveBill.totalBill, t.common.rs)}`,
-        );
+
+        const splitPaid =
+          form.paymentTiming === "paid_at_checkin"
+            ? liveBill.totalBill
+            : form.paymentTiming === "partial"
+              ? paidNow
+              : 0;
+        const splitDue = Math.max(0, liveBill.totalBill - splitPaid);
+
+        try {
+          await sendGuestCheckInEmail({
+            guestName: form.guestName.trim(),
+            email: form.email.trim(),
+            phone: form.phone.trim(),
+            roomNumber: room.number,
+            checkInAt,
+            checkOutAt,
+            nights: liveBill.nights,
+            nightlyRate: rate,
+            totalBill: liveBill.totalBill,
+            amountPaid: splitPaid,
+            balanceDue: splitDue,
+            paymentStatus:
+              splitDue <= 0 ? "paid" : splitPaid > 0 ? "partial" : "pending",
+            paymentTiming: form.paymentTiming,
+            adults,
+            children,
+            nationality: form.nationality,
+            cnic: form.cnic,
+            notes: form.notes,
+            rs: t.common.rs,
+          });
+          toastSuccess(
+            "Checked in",
+            `${form.guestName.trim()} → Room ${room.number} · confirmation emailed`,
+          );
+        } catch (mailErr) {
+          toastSuccess(
+            "Checked in",
+            `${form.guestName.trim()} → Room ${room.number} · ${formatRs(liveBill.totalBill, t.common.rs)}`,
+          );
+          toastError(
+            "Email not sent",
+            mailErr instanceof Error
+              ? mailErr.message
+              : isGuestEmailConfigured()
+                ? "Could not send confirmation email."
+                : "Add SMTP_* to .env and run the email server to enable guest emails.",
+          );
+        }
       }
 
       setMode(null);
@@ -684,14 +833,19 @@ export function CheckInPage() {
                           ? "Cancelled"
                           : "Checked out"}
                     </Badge>
-                    {row.paymentTiming === "paid_at_checkin" || row.paymentStatus === "paid" ? (
-                      <Badge tone="success">Paid</Badge>
-                    ) : row.paymentStatus === "due" ? (
-                      <Badge tone="danger">Due</Badge>
-                    ) : (
-                      <Badge tone="warning">Pay on checkout</Badge>
-                    )}
-                    {row.cnicImageUrl ? <Badge tone="info">CNIC on file</Badge> : null}
+                    {(() => {
+                      const b = paymentBadge(row);
+                      return <Badge tone={b.tone}>{b.label}</Badge>;
+                    })()}
+                    {row.paymentStatus === "partial" ||
+                    (resolveAmountPaid(row) > 0 && resolveBalanceDue(row) > 0) ? (
+                      <span className="text-xs text-muted">
+                        {paymentSplitLine(row, t.common.rs)}
+                      </span>
+                    ) : null}
+                    {row.cnicFrontImageUrl || row.cnicImageUrl || row.cnicBackImageUrl ? (
+                      <Badge tone="info">CNIC on file</Badge>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-sm text-muted">
                     Room {row.roomNumber} · {row.phone}
@@ -712,7 +866,7 @@ export function CheckInPage() {
                   <Button
                     type="button"
                     size="sm"
-                    className="cursor-pointer !bg-sky-600 !text-white hover:!opacity-90"
+                    className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
                     icon={<Eye className="h-3.5 w-3.5" />}
                     onClick={() => setViewRow(row)}
                   >
@@ -814,29 +968,22 @@ export function CheckInPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <Detail label={t.common.name} value={viewRow.guestName} />
               <Detail label={t.common.phone} value={viewRow.phone} />
+              <Detail label={t.common.email} value={viewRow.email || "—"} />
               <Detail label={t.common.cnic} value={viewRow.cnic || "—"} />
               <Detail label={t.common.nationality} value={viewRow.nationality || "—"} />
               <Detail label={t.common.checkIn} value={formatDateTime(viewRow.checkInAt)} />
               <Detail label={t.common.checkOut} value={formatDateTime(viewRow.checkOutAt)} />
               <Detail label="Guests" value={`${viewRow.adults} adults · ${viewRow.children} children`} />
               <Detail label="Purpose" value={viewRow.purpose} />
+              <Detail label="Payment" value={paymentStatusLabel(viewRow.paymentStatus)} />
+              <Detail label="Payment plan" value={paymentPlanLabel(viewRow.paymentTiming)} />
               <Detail
-                label="Payment"
-                value={
-                  viewRow.paymentStatus === "paid"
-                    ? "Paid"
-                    : viewRow.paymentStatus === "due"
-                      ? "Due"
-                      : "Pay on checkout"
-                }
+                label="Paid so far"
+                value={formatRs(resolveAmountPaid(viewRow), t.common.rs)}
               />
               <Detail
-                label="Payment plan"
-                value={
-                  viewRow.paymentTiming === "paid_at_checkin"
-                    ? "Cash at check-in"
-                    : "Due on checkout"
-                }
+                label="Balance due"
+                value={formatRs(resolveBalanceDue(viewRow), t.common.rs)}
               />
             </div>
             <BillSummary
@@ -844,6 +991,8 @@ export function CheckInPage() {
               nightlyRate={viewRow.nightlyRate}
               totalBill={viewRow.totalBill}
               rs={t.common.rs}
+              paymentTiming={viewRow.paymentTiming}
+              amountPaidAtCheckIn={resolveAmountPaid(viewRow)}
             />
             {viewRow.companions.length > 0 ? (
               <div>
@@ -862,14 +1011,43 @@ export function CheckInPage() {
             {viewRow.notes ? (
               <p className="rounded-xl bg-app px-3 py-2 text-sm text-muted">{viewRow.notes}</p>
             ) : null}
-            {viewRow.cnicImageUrl ? (
-              <a href={viewRow.cnicImageUrl} target="_blank" rel="noreferrer" className="inline-block">
-                <img
-                  src={viewRow.cnicImageUrl}
-                  alt="CNIC"
-                  className="h-36 w-56 rounded-xl border border-app object-cover"
-                />
-              </a>
+            {(viewRow.cnicFrontImageUrl || viewRow.cnicImageUrl || viewRow.cnicBackImageUrl) ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(viewRow.cnicFrontImageUrl || viewRow.cnicImageUrl) ? (
+                  <a
+                    href={viewRow.cnicFrontImageUrl || viewRow.cnicImageUrl || ""}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-block"
+                  >
+                    <p className="mb-1 text-xs font-bold uppercase tracking-wide text-muted">
+                      CNIC front
+                    </p>
+                    <img
+                      src={viewRow.cnicFrontImageUrl || viewRow.cnicImageUrl || ""}
+                      alt="CNIC front"
+                      className="h-36 w-full rounded-xl border border-app object-cover"
+                    />
+                  </a>
+                ) : null}
+                {viewRow.cnicBackImageUrl ? (
+                  <a
+                    href={viewRow.cnicBackImageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-block"
+                  >
+                    <p className="mb-1 text-xs font-bold uppercase tracking-wide text-muted">
+                      CNIC back
+                    </p>
+                    <img
+                      src={viewRow.cnicBackImageUrl}
+                      alt="CNIC back"
+                      className="h-36 w-full rounded-xl border border-app object-cover"
+                    />
+                  </a>
+                ) : null}
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -963,6 +1141,29 @@ export function CheckInPage() {
               <p className="mt-2 text-xs text-muted">
                 Room will become available and marked dirty for housekeeping.
               </p>
+              {(resolveAmountPaid(pendingEdit) > 0 || resolveBalanceDue(pendingEdit) > 0) && (
+                <div className="mt-2 space-y-0.5 border-t border-[color-mix(in_oklab,var(--accent)_25%,transparent)] pt-2 text-xs">
+                  <p className="flex justify-between gap-2">
+                    <span className="text-muted">Already paid</span>
+                    <span className="font-semibold text-app">
+                      {formatRs(resolveAmountPaid(pendingEdit), t.common.rs)}
+                    </span>
+                  </p>
+                  <p className="flex justify-between gap-2">
+                    <span className="text-muted">Balance due now</span>
+                    <span className="font-bold text-[var(--accent)]">
+                      {formatRs(
+                        Math.max(
+                          0,
+                          (checkoutPreview?.totalBill ?? pendingEdit.totalBill) -
+                            resolveAmountPaid(pendingEdit),
+                        ),
+                        t.common.rs,
+                      )}
+                    </span>
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="rounded-xl border border-app bg-app px-4 py-3 text-sm text-muted">
@@ -977,25 +1178,27 @@ export function CheckInPage() {
                 type="checkbox"
                 className="mt-1 h-4 w-4 accent-[var(--accent)]"
                 checked={
-                  pendingEdit.paymentTiming === "paid_at_checkin" ||
+                  resolveBalanceDue(pendingEdit) <= 0 ||
                   pendingEdit.paymentStatus === "paid" ||
                   checkoutPaymentPaid
                 }
                 disabled={
-                  pendingEdit.paymentTiming === "paid_at_checkin" ||
-                  pendingEdit.paymentStatus === "paid"
+                  resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
                 }
                 onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
               />
               <span className="min-w-0 text-sm">
-                <span className="font-bold text-app">Payment paid</span>
+                <span className="font-bold text-app">
+                  {resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
+                    ? "Payment paid"
+                    : "Remaining balance paid"}
+                </span>
                 <span className="mt-0.5 block text-xs text-muted">
-                  {pendingEdit.paymentTiming === "paid_at_checkin" ||
-                  pendingEdit.paymentStatus === "paid"
-                    ? "Already paid at check-in — stays marked paid."
+                  {resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
+                    ? "Bill already settled — stays marked paid."
                     : checkoutPaymentPaid
-                      ? "Guest paid at checkout — list will show Paid."
-                      : "Leave unchecked only if payment is still outstanding (Due)."}
+                      ? "Collect the remaining balance now — list will show Paid."
+                      : "Leave unchecked if the remaining balance is still outstanding (Due)."}
                 </span>
               </span>
             </label>
@@ -1063,6 +1266,15 @@ export function CheckInPage() {
                   value={form.phone}
                   onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
                   placeholder="03XX-XXXXXXX"
+                />
+              </Field>
+              <Field label={t.common.email}>
+                <Input
+                  required
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                  placeholder="guest@email.com"
                 />
               </Field>
               <Field label={t.common.cnic}>
@@ -1136,6 +1348,8 @@ export function CheckInPage() {
                     setForm((p) => ({
                       ...p,
                       paymentTiming: paymentTiming as PaymentTiming,
+                      amountPaidAtCheckIn:
+                        paymentTiming === "partial" ? p.amountPaidAtCheckIn : "",
                     }))
                   }
                   options={PAYMENT_OPTIONS.map((o) => ({
@@ -1145,6 +1359,24 @@ export function CheckInPage() {
                   }))}
                 />
               </SelectField>
+              {form.paymentTiming === "partial" ? (
+                <Field label="Cash paid at check-in" className="sm:col-span-2">
+                  <Input
+                    required
+                    type="number"
+                    min={1}
+                    step="1"
+                    value={form.amountPaidAtCheckIn}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, amountPaidAtCheckIn: e.target.value }))
+                    }
+                    placeholder="e.g. 5000"
+                  />
+                  <p className="mt-1 text-xs text-muted">
+                    Remaining balance will be due when the guest checks out.
+                  </p>
+                </Field>
+              ) : null}
             </div>
           </div>
 
@@ -1154,6 +1386,8 @@ export function CheckInPage() {
               nightlyRate={liveBill.nightlyRate}
               totalBill={liveBill.totalBill}
               rs={t.common.rs}
+              paymentTiming={form.paymentTiming}
+              amountPaidAtCheckIn={Number(form.amountPaidAtCheckIn) || 0}
             />
           ) : (
             <p className="rounded-xl bg-app px-3 py-2 text-sm text-muted">
@@ -1232,56 +1466,50 @@ export function CheckInPage() {
             <div className="mb-3 flex items-center gap-2">
               <IdCard className="h-4 w-4 text-[var(--accent)]" />
               <div>
-                <p className="text-sm font-bold">CNIC picture (optional)</p>
-                <p className="text-xs text-muted">Stored on Cloudinary for verification.</p>
+                <p className="text-sm font-bold">CNIC photos (optional)</p>
+                <p className="text-xs text-muted">Front and back — stored on Cloudinary.</p>
               </div>
             </div>
             <input
-              ref={cnicFileRef}
+              ref={cnicFrontRef}
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={(e) => onPickCnic(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                onPickCnic("front", e.target.files?.[0] ?? null);
+                e.target.value = "";
+              }}
             />
-            {cnicPreview || existingCnicUrl ? (
-              <div className="flex flex-wrap items-end gap-3">
-                <img
-                  src={cnicPreview || existingCnicUrl || ""}
-                  alt="CNIC preview"
-                  className="h-28 w-44 rounded-xl border border-app object-cover"
-                />
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => cnicFileRef.current?.click()}
-                  >
-                    Change
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      onPickCnic(null);
-                      setExistingCnicUrl(null);
-                    }}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => cnicFileRef.current?.click()}
-                className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-app bg-app px-4 py-8 text-muted transition hover:border-[var(--accent)]"
-              >
-                <ImagePlus className="h-7 w-7 opacity-50" />
-                <span className="text-sm font-semibold">Upload CNIC photo</span>
-              </button>
-            )}
+            <input
+              ref={cnicBackRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                onPickCnic("back", e.target.files?.[0] ?? null);
+                e.target.value = "";
+              }}
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <CnicUploadSlot
+                label="Front side"
+                preview={cnicFrontPreview || existingCnicFrontUrl}
+                onPick={() => cnicFrontRef.current?.click()}
+                onClear={() => {
+                  onPickCnic("front", null);
+                  setExistingCnicFrontUrl(null);
+                }}
+              />
+              <CnicUploadSlot
+                label="Back side"
+                preview={cnicBackPreview || existingCnicBackUrl}
+                onPick={() => cnicBackRef.current?.click()}
+                onClear={() => {
+                  onPickCnic("back", null);
+                  setExistingCnicBackUrl(null);
+                }}
+              />
+            </div>
           </div>
 
           <Field label={t.common.notes}>
@@ -1301,6 +1529,50 @@ export function CheckInPage() {
 function stayFallbackNights(row: CheckInRecord) {
   if (row.nights) return row.nights;
   return calcRoomBill(row.nightlyRate || 0, row.checkInAt, row.checkOutAt).nights;
+}
+
+function CnicUploadSlot({
+  label,
+  preview,
+  onPick,
+  onClear,
+}: {
+  label: string;
+  preview: string | null;
+  onPick: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-dashed border-app bg-app p-3">
+      <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">{label}</p>
+      {preview ? (
+        <div className="space-y-2">
+          <img
+            src={preview}
+            alt={label}
+            className="h-28 w-full rounded-lg border border-app object-cover"
+          />
+          <div className="flex gap-2">
+            <Button type="button" size="sm" variant="secondary" onClick={onPick}>
+              Change
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={onClear}>
+              Remove
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onPick}
+          className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-lg px-3 py-6 text-muted transition hover:border-[var(--accent)]"
+        >
+          <ImagePlus className="h-6 w-6 opacity-50" />
+          <span className="text-xs font-semibold">Upload {label.toLowerCase()}</span>
+        </button>
+      )}
+    </div>
+  );
 }
 
 function Detail({ label, value }: { label: string; value: string }) {

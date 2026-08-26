@@ -1,78 +1,358 @@
+import { Download, Eye, Printer, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { GuestInvoiceDocument } from "../components/invoice/GuestInvoiceDocument";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { PageHeader, StatCard } from "../components/ui/Page";
+import { Modal } from "../components/ui/Modal";
+import { EmptyState, PageHeader, StatCard } from "../components/ui/Page";
 import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
-import { invoices } from "../data/mock";
+import { useToast } from "../context/toast-context";
+import { downloadCsv, toCsv } from "../lib/exportSpreadsheet";
+import { buildGuestInvoices, invoiceListStatus } from "../lib/invoiceBuild";
+import { downloadInvoicePdf, printInvoiceElement } from "../lib/invoiceExport";
 import { formatRs } from "../lib/utils";
+import {
+  fetchCheckIns,
+  subscribeCheckIns,
+  type CheckInRecord,
+} from "../services/checkIns";
+import { fetchOrders, subscribeOrders, type FoodOrder } from "../services/orders";
+import type { GuestInvoice, InvoiceListStatus } from "../types/invoice";
 
-const statusTone = {
+const hotelName =
+  (import.meta.env.VITE_HOTEL_NAME as string | undefined) ||
+  "Tabarak Hotel & Restaurant";
+
+const statusTone: Record<InvoiceListStatus, "success" | "warning" | "danger"> = {
   paid: "success",
-  unpaid: "danger",
   partial: "warning",
-  void: "muted",
-} as const;
+  unpaid: "danger",
+};
+
+const statusLabel: Record<InvoiceListStatus, string> = {
+  paid: "Paid",
+  partial: "Partial",
+  unpaid: "Unpaid",
+};
+
+function formatDate(iso: string) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function typeLabel(type: GuestInvoice["type"]) {
+  if (type === "combined") return "Room + food";
+  if (type === "restaurant") return "Restaurant";
+  return "Room";
+}
 
 export function InvoicesPage() {
   const { t } = useApp();
-  const unpaid = invoices.filter((i) => i.status === "unpaid" || i.status === "partial");
-  const collected = invoices.reduce((s, i) => s + i.paid, 0);
+  const { success: toastSuccess, error: toastError } = useToast();
+
+  const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
+  const [orders, setOrders] = useState<FoodOrder[]>([]);
+  const [statusFilter, setStatusFilter] = useState<"all" | InvoiceListStatus>("all");
+  const [openInvoice, setOpenInvoice] = useState<GuestInvoice | null>(null);
+  const [busy, setBusy] = useState<"print" | "pdf" | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const a = subscribeCheckIns(setCheckIns);
+    const b = subscribeOrders(setOrders);
+    return () => {
+      a();
+      b();
+    };
+  }, []);
+
+  const invoices = useMemo(
+    () => buildGuestInvoices(checkIns, orders),
+    [checkIns, orders],
+  );
+
+  // Keep open invoice in sync after refresh / live updates
+  useEffect(() => {
+    if (!openInvoice) return;
+    const next = invoices.find((inv) => inv.id === openInvoice.id);
+    if (next) setOpenInvoice(next);
+  }, [invoices, openInvoice?.id]);
+
+  const filtered = useMemo(() => {
+    if (statusFilter === "all") return invoices;
+    return invoices.filter((inv) => invoiceListStatus(inv) === statusFilter);
+  }, [invoices, statusFilter]);
+
+  const stats = useMemo(() => {
+    let collected = 0;
+    let openBalance = 0;
+    let unpaidCount = 0;
+    for (const inv of invoices) {
+      collected += inv.amountPaid;
+      openBalance += inv.balanceDue;
+      const s = invoiceListStatus(inv);
+      if (s === "unpaid" || s === "partial") unpaidCount += 1;
+    }
+    return { collected, openBalance, unpaidCount, total: invoices.length };
+  }, [invoices]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    try {
+      const [nextCheckIns, nextOrders] = await Promise.all([
+        fetchCheckIns(),
+        fetchOrders(),
+      ]);
+      setCheckIns(nextCheckIns);
+      setOrders(nextOrders);
+      toastSuccess("Refreshed", "Invoices updated from the latest records.");
+    } catch (err) {
+      toastError(
+        "Refresh failed",
+        err instanceof Error ? err.message : "Could not reload invoices.",
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function onPrint() {
+    if (!sheetRef.current || !openInvoice) return;
+    setBusy("print");
+    try {
+      printInvoiceElement(sheetRef.current, openInvoice.number);
+    } catch (err) {
+      toastError(
+        "Print failed",
+        err instanceof Error ? err.message : "Allow pop-ups and try again.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onDownloadPdf() {
+    if (!sheetRef.current || !openInvoice) return;
+    setBusy("pdf");
+    try {
+      await downloadInvoicePdf(
+        sheetRef.current,
+        `${openInvoice.number.replace(/[^\w.-]+/g, "_")}.pdf`,
+      );
+      toastSuccess("Downloaded", `${openInvoice.number}.pdf`);
+    } catch (err) {
+      toastError(
+        "Download failed",
+        err instanceof Error ? err.message : "Could not create PDF.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function onExportList() {
+    if (!filtered.length) {
+      toastError("Nothing to export", "No invoices match this filter.");
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadCsv(
+      `tabarak-invoices-${stamp}.csv`,
+      toCsv(filtered, [
+        { header: "Invoice", value: (r) => r.number },
+        { header: "Guest", value: (r) => r.guestName },
+        { header: "Room", value: (r) => r.roomNumber },
+        { header: "Type", value: (r) => typeLabel(r.type) },
+        { header: "Check-in", value: (r) => r.checkInAt },
+        { header: "Check-out", value: (r) => r.checkOutAt },
+        { header: "Total", value: (r) => r.totalBill },
+        { header: "Paid", value: (r) => r.amountPaid },
+        { header: "Balance", value: (r) => r.balanceDue },
+        { header: "Status", value: (r) => invoiceListStatus(r) },
+      ]),
+    );
+    toastSuccess("Exported", "Invoice list CSV downloaded.");
+  }
 
   return (
     <div>
       <PageHeader
         title={t.pages.invoicesTitle}
-        subtitle={t.pages.invoicesSub}
+        subtitle="Guest folios from check-ins — room stay plus restaurant orders on the bill."
         actions={
           <>
-            <Button variant="secondary">{t.common.export}</Button>
-            <Button>{t.common.add} invoice</Button>
+            <Button
+              variant="secondary"
+              className="cursor-pointer"
+              icon={
+                <RefreshCw
+                  className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+                />
+              }
+              disabled={refreshing}
+              onClick={() => void onRefresh()}
+            >
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button
+              variant="secondary"
+              className="cursor-pointer"
+              icon={<Download className="h-4 w-4" />}
+              onClick={onExportList}
+            >
+              {t.common.export}
+            </Button>
           </>
         }
       />
+
       <div className="mb-4 grid gap-4 sm:grid-cols-3">
-        <StatCard label="Invoices today" value={String(invoices.length)} />
-        <StatCard label="Collected" value={formatRs(collected, t.common.rs)} />
-        <StatCard label="Open balance" value={String(unpaid.length)} alert={unpaid.length} />
+        <StatCard label="Folios" value={String(stats.total)} />
+        <StatCard
+          label="Collected"
+          value={formatRs(stats.collected, t.common.rs)}
+        />
+        <StatCard
+          label="Open balance"
+          value={formatRs(stats.openBalance, t.common.rs)}
+          alert={stats.unpaidCount || undefined}
+          hint={`${stats.unpaidCount} unpaid / partial`}
+        />
       </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {(
+          [
+            ["all", "All"],
+            ["unpaid", "Unpaid"],
+            ["partial", "Partial"],
+            ["paid", "Paid"],
+          ] as const
+        ).map(([value, label]) => (
+          <Button
+            key={value}
+            size="sm"
+            variant={statusFilter === value ? "primary" : "secondary"}
+            onClick={() => setStatusFilter(value)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+
       <Card>
-        <Table
-          headers={[
-            "Invoice",
-            t.common.guest,
-            t.common.type,
-            t.common.date,
-            t.common.amount,
-            t.common.paid,
-            t.status,
-            t.common.actions,
-          ]}
-        >
-          {invoices.map((inv) => (
-            <Tr key={inv.id}>
-              <Td className="font-bold">{inv.number}</Td>
-              <Td>{inv.guest}</Td>
-              <Td>
-                <Badge tone="muted">{inv.type}</Badge>
-              </Td>
-              <Td className="text-muted">{inv.date}</Td>
-              <Td className="font-semibold">{formatRs(inv.amount, t.common.rs)}</Td>
-              <Td>{formatRs(inv.paid, t.common.rs)}</Td>
-              <Td>
-                <Badge tone={statusTone[inv.status]}>
-                  {t.common[inv.status as "paid" | "unpaid" | "partial" | "void"]}
-                </Badge>
-              </Td>
-              <Td>
-                <Button size="sm" variant="secondary">
-                  Open
-                </Button>
-              </Td>
-            </Tr>
-          ))}
-        </Table>
+        {filtered.length === 0 ? (
+          <EmptyState message="No invoices yet. Check in a guest to generate a folio." />
+        ) : (
+          <Table
+            headers={[
+              "Invoice",
+              t.common.guest,
+              t.common.type,
+              t.common.date,
+              t.common.amount,
+              t.common.paid,
+              t.status,
+              t.common.actions,
+            ]}
+          >
+            {filtered.map((inv) => {
+              const status = invoiceListStatus(inv);
+              return (
+                <Tr key={inv.id}>
+                  <Td className="font-bold font-mono text-xs sm:text-sm">
+                    {inv.number}
+                  </Td>
+                  <Td>
+                    <div className="font-semibold">{inv.guestName}</div>
+                    <div className="text-xs text-muted">Room {inv.roomNumber}</div>
+                  </Td>
+                  <Td>
+                    <Badge tone="muted">{typeLabel(inv.type)}</Badge>
+                  </Td>
+                  <Td className="text-muted">{formatDate(inv.checkInAt)}</Td>
+                  <Td className="font-semibold">
+                    {formatRs(inv.totalBill, t.common.rs)}
+                  </Td>
+                  <Td>{formatRs(inv.amountPaid, t.common.rs)}</Td>
+                  <Td>
+                    <Badge tone={statusTone[status]}>{statusLabel[status]}</Badge>
+                  </Td>
+                  <Td>
+                    <Button
+                      size="sm"
+                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
+                      icon={<Eye className="h-3.5 w-3.5" />}
+                      onClick={() => setOpenInvoice(inv)}
+                    >
+                      Open
+                    </Button>
+                  </Td>
+                </Tr>
+              );
+            })}
+          </Table>
+        )}
       </Card>
+
+      <Modal
+        open={Boolean(openInvoice)}
+        onClose={() => setOpenInvoice(null)}
+        title={openInvoice?.number ?? "Invoice"}
+        subtitle={
+          openInvoice
+            ? `${openInvoice.guestName} · Room ${openInvoice.roomNumber}`
+            : undefined
+        }
+        wide
+        xl
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setOpenInvoice(null)}>
+              Close
+            </Button>
+            <Button
+              variant="secondary"
+              className="cursor-pointer"
+              icon={<Printer className="h-4 w-4" />}
+              disabled={busy !== null}
+              onClick={() => void onPrint()}
+            >
+              {busy === "print" ? "Opening…" : "Print"}
+            </Button>
+            <Button
+              variant="gold"
+              className="cursor-pointer"
+              icon={<Download className="h-4 w-4" />}
+              disabled={busy !== null}
+              onClick={() => void onDownloadPdf()}
+            >
+              {busy === "pdf" ? "Preparing…" : "Download PDF"}
+            </Button>
+          </>
+        }
+      >
+        {openInvoice ? (
+          <div className="max-h-[70vh] overflow-auto rounded-xl bg-[#e8e4dc] p-3 sm:p-5">
+            <GuestInvoiceDocument
+              ref={sheetRef}
+              invoice={openInvoice}
+              hotelName={hotelName}
+              rs={t.common.rs}
+            />
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

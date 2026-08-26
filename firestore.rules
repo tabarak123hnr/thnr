@@ -111,7 +111,21 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Rest of the app data (orders, bookings, etc.) — signed-in staff for now
+    // Food orders — billed to active check-in / room
+    match /orders/{orderId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if signedIn();
+    }
+
+    // Menu catalog (when Menu page writes to Firestore)
+    match /menuItems/{itemId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if isAdmin();
+    }
+
+    // Rest of the app data — signed-in staff for now
     match /{document=**} {
       allow read, write: if signedIn();
     }
