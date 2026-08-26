@@ -275,8 +275,11 @@ function escapeHtml(value: string) {
 }
 
 /**
- * Sends guest check-in confirmation via Nodemailer API (`server/email-server.mjs`).
- * Requires SMTP_* in .env and the email server running (`npm run email-server` or `npm run dev`).
+ * Sends guest check-in confirmation via Nodemailer API.
+ *
+ * Local: Vite proxies /api → `npm run email-server` (SMTP_* in repo .env).
+ * Production: Firebase Function `api` + Hosting rewrite /api/** (SMTP_* on the function).
+ * Or set VITE_EMAIL_API_URL to the function base URL.
  */
 export async function sendGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
   const to = payload.email.trim();
@@ -288,10 +291,11 @@ export async function sendGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
   }
 
   const { subject, text, html } = buildGuestCheckInEmail(payload);
+  const url = emailApiUrl("/api/send-guest-email");
 
   let res: Response;
   try {
-    res = await fetch(emailApiUrl("/api/send-guest-email"), {
+    res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -304,13 +308,21 @@ export async function sendGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
     });
   } catch {
     throw new Error(
-      "Email server is not reachable. Run `npm run email-server` (or `npm run dev`) and check SMTP settings in .env.",
+      "Email API is not reachable. Locally run `npm run email-server` (or `npm run dev`). In production deploy the email function (`npm run deploy:email`) and use Firebase Hosting rewrites, or set VITE_EMAIL_API_URL.",
     );
   }
 
   const data = (await res.json().catch(() => ({}))) as { error?: string; ok?: boolean };
+  if (res.status === 404) {
+    throw new Error(
+      "Email API not found (404). On Vercel, redeploy so /api/send-guest-email exists and set SMTP_HOST, SMTP_USER, SMTP_PASS in Vercel Environment Variables (not VITE_*).",
+    );
+  }
   if (!res.ok) {
-    throw new Error(data.error || `Email failed (${res.status}). Check SMTP_* in .env.`);
+    throw new Error(
+      data.error ||
+        `Email failed (${res.status}). Check SMTP_HOST / SMTP_USER / SMTP_PASS on the email server (Cloud Function), not only in the frontend .env.`,
+    );
   }
 }
 
