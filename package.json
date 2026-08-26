@@ -11,7 +11,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "seed:admin": "node scripts/seed-admin.mjs",
-    "deploy:rules": "firebase deploy --only firestore:rules"
+    "deploy:rules": "firebase deploy --only firestore:rules",
+    "deploy:email": "npm --prefix functions install && firebase deploy --only functions:api",
+    "deploy:hosting": "npm run build && firebase deploy --only hosting",
+    "deploy:app": "npm run build && npm --prefix functions install && firebase deploy --only hosting,functions:api"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
