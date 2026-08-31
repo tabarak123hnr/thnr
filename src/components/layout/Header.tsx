@@ -1,10 +1,13 @@
-import { Bell, Menu, Moon, Search, Sun, Volume2 } from "lucide-react";
+import { Bell, Menu, Moon, Search, Sun } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useApp } from "../../context/app-context";
+import { useOpsBadges } from "../../hooks/useOpsBadges";
 import { Button } from "../ui/Button";
 
 export function Header({ onMenu }: { onMenu: () => void }) {
   const { t, language, setLanguage, theme, toggleTheme } = useApp();
+  const { notificationsBadge } = useOpsBadges();
+  const notifCount = notificationsBadge ?? 0;
 
   return (
     <header className="sticky top-0 z-20 border-b border-app bg-[color-mix(in_oklab,var(--bg)_88%,transparent)] backdrop-blur-md">
@@ -12,7 +15,7 @@ export function Header({ onMenu }: { onMenu: () => void }) {
         <button
           type="button"
           onClick={onMenu}
-          className="rounded-xl border border-app p-2 lg:hidden"
+          className="cursor-pointer rounded-xl border border-app p-2 lg:hidden"
           aria-label="Menu"
         >
           <Menu className="h-5 w-5" />
@@ -31,32 +34,38 @@ export function Header({ onMenu }: { onMenu: () => void }) {
           <button
             type="button"
             onClick={() => setLanguage(language === "en" ? "ur" : "en")}
-            className="h-10 rounded-xl border border-app px-3 text-xs font-bold hover:bg-accent-soft"
+            className="h-10 cursor-pointer rounded-xl border border-app px-3 text-xs font-bold hover:bg-accent-soft"
           >
             {language === "en" ? "اردو" : "EN"}
           </button>
           <button
             type="button"
             onClick={toggleTheme}
-            className="rounded-xl border border-app p-2.5 hover:bg-accent-soft"
+            className="cursor-pointer rounded-xl border border-app p-2.5 hover:bg-accent-soft"
             title={theme === "light" ? t.darkMode : t.lightMode}
           >
             {theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           </button>
-          <button type="button" className="rounded-xl border border-app p-2.5 hover:bg-accent-soft">
-            <Volume2 className="h-4 w-4" />
-          </button>
-          <button type="button" className="relative rounded-xl border border-app p-2.5 hover:bg-accent-soft">
+          <Link
+            to="/notifications"
+            className="relative inline-flex cursor-pointer rounded-xl border border-app p-2.5 hover:bg-accent-soft"
+            title={t.pages.notificationsTitle}
+            aria-label={`${t.pages.notificationsTitle}${notifCount ? `: ${notifCount}` : ""}`}
+          >
             <Bell className="h-4 w-4" />
-            <span className="absolute -end-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--danger)] ring-2 ring-[var(--bg)]" />
-          </button>
+            {notifCount > 0 ? (
+              <span className="absolute -end-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--danger)] px-1 text-[10px] font-bold leading-none text-white ring-2 ring-[var(--bg)]">
+                {notifCount > 99 ? "99+" : notifCount}
+              </span>
+            ) : null}
+          </Link>
         </div>
 
         <div className="hidden items-center gap-2 md:flex">
-          <Link to="/check-in">
+          <Link to="/check-in" className="cursor-pointer">
             <Button size="md">{t.newCheckIn}</Button>
           </Link>
-          <Link to="/counter">
+          <Link to="/counter" className="cursor-pointer">
             <Button size="md" variant="secondary">
               {t.newOrder}
             </Button>
