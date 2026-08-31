@@ -2,6 +2,9 @@
 
 export type FoodOrderStatus = "pending" | "delivered";
 
+/** Whether the guest settled this food ticket at the counter / delivery. */
+export type FoodOrderPaymentStatus = "paid" | "due";
+
 export interface FoodOrderItem {
   menuItemId: string;
   name: string;
@@ -21,6 +24,8 @@ export interface FoodOrder {
   items: FoodOrderItem[];
   amount: number;
   status: FoodOrderStatus;
+  /** Cash collected for this ticket, or still owed on the stay */
+  paymentStatus: FoodOrderPaymentStatus;
   notes: string;
   createdAt?: unknown;
   updatedAt?: unknown;

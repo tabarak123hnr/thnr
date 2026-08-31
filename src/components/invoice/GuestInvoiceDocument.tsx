@@ -33,6 +33,7 @@ export const GuestInvoiceDocument = forwardRef<
   HTMLDivElement,
   { invoice: GuestInvoice; hotelName: string; rs?: string }
 >(function GuestInvoiceDocument({ invoice, hotelName, rs = "Rs" }, ref) {
+  const isFood = invoice.type === "restaurant";
   const status = invoiceListStatus(invoice);
   const statusLabel =
     status === "paid" ? "PAID" : status === "partial" ? "PARTIAL" : "DUE";
@@ -55,7 +56,6 @@ export const GuestInvoiceDocument = forwardRef<
         overflow: "hidden",
       }}
     >
-      {/* Top brand bar */}
       <div
         style={{
           background: HEADER_BG,
@@ -93,7 +93,7 @@ export const GuestInvoiceDocument = forwardRef<
                 fontWeight: 700,
               }}
             >
-              Guest folio
+              {isFood ? "Restaurant invoice" : "Room invoice"}
             </p>
             <h1
               style={{
@@ -107,7 +107,9 @@ export const GuestInvoiceDocument = forwardRef<
               {hotelName}
             </h1>
             <p style={{ margin: "8px 0 0", fontSize: 13, color: "#b0b0b0" }}>
-              Hotel &amp; Restaurant · Stay invoice
+              {isFood
+                ? "Hotel & Restaurant · Food / room service bill"
+                : "Hotel & Restaurant · Accommodation folio"}
             </p>
           </div>
           <div style={{ textAlign: "right" }}>
@@ -155,11 +157,9 @@ export const GuestInvoiceDocument = forwardRef<
         </div>
       </div>
 
-      {/* Gold rule */}
       <div style={{ height: 3, background: `linear-gradient(90deg, ${GOLD}, #f0d78c, ${GOLD})` }} />
 
       <div style={{ padding: "28px 36px 36px" }}>
-        {/* Guest + stay */}
         <div
           style={{
             display: "grid",
@@ -185,7 +185,7 @@ export const GuestInvoiceDocument = forwardRef<
             ) : null}
           </div>
           <div style={{ textAlign: "right" }}>
-            <p style={sectionLabel}>Stay details</p>
+            <p style={sectionLabel}>{isFood ? "Service to" : "Stay details"}</p>
             <p style={{ margin: "6px 0 0", fontSize: 20, fontWeight: 800 }}>
               Room {invoice.roomNumber}
             </p>
@@ -195,18 +195,23 @@ export const GuestInvoiceDocument = forwardRef<
             <p style={{ margin: "2px 0 0", fontSize: 13, color: MUTED }}>
               Check-out · {fmtDate(invoice.checkOutAt)}
             </p>
-            <p style={{ margin: "2px 0 0", fontSize: 13, color: MUTED }}>
-              {invoice.nights} night{invoice.nights === 1 ? "" : "s"} · {invoice.adults} adult
-              {invoice.adults === 1 ? "" : "s"}
-              {invoice.children > 0 ? ` · ${invoice.children} child(ren)` : ""}
-            </p>
+            {!isFood ? (
+              <p style={{ margin: "2px 0 0", fontSize: 13, color: MUTED }}>
+                {invoice.nights} night{invoice.nights === 1 ? "" : "s"} · {invoice.adults} adult
+                {invoice.adults === 1 ? "" : "s"}
+                {invoice.children > 0 ? ` · ${invoice.children} child(ren)` : ""}
+              </p>
+            ) : (
+              <p style={{ margin: "2px 0 0", fontSize: 13, color: MUTED }}>
+                Room service / restaurant charges for this stay
+              </p>
+            )}
             <p style={{ margin: "2px 0 0", fontSize: 13, color: MUTED }}>
               {invoice.stayStatus === "checked_in" ? "In house" : "Checked out"}
             </p>
           </div>
         </div>
 
-        {/* Line items */}
         <table
           style={{
             width: "100%",
@@ -223,26 +228,47 @@ export const GuestInvoiceDocument = forwardRef<
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td colSpan={4} style={groupHeader}>
-                Accommodation
-              </td>
-            </tr>
-            <tr>
-              <td style={tdLeft}>
-                Room {invoice.roomNumber} — {invoice.nights} night
-                {invoice.nights === 1 ? "" : "s"}
-              </td>
-              <td style={tdCenter}>{invoice.nights}</td>
-              <td style={tdRight}>{fmtMoney(invoice.nightlyRate, rs)}</td>
-              <td style={{ ...tdRight, fontWeight: 700 }}>{fmtMoney(invoice.roomCharges, rs)}</td>
-            </tr>
-
-            {invoice.foodLines.length > 0 ? (
+            {!isFood ? (
               <>
                 <tr>
                   <td colSpan={4} style={groupHeader}>
-                    Restaurant / room service
+                    Accommodation
+                  </td>
+                </tr>
+                <tr>
+                  <td style={tdLeft}>
+                    Room {invoice.roomNumber} — {invoice.nights} night
+                    {invoice.nights === 1 ? "" : "s"}
+                  </td>
+                  <td style={tdCenter}>{invoice.nights}</td>
+                  <td style={tdRight}>{fmtMoney(invoice.nightlyRate, rs)}</td>
+                  <td style={{ ...tdRight, fontWeight: 700 }}>
+                    {fmtMoney(invoice.roomCharges, rs)}
+                  </td>
+                </tr>
+                {invoice.otherExtras > 0 ? (
+                  <>
+                    <tr>
+                      <td colSpan={4} style={groupHeader}>
+                        Other charges
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style={tdLeft}>Extras / miscellaneous</td>
+                      <td style={tdCenter}>1</td>
+                      <td style={tdRight}>{fmtMoney(invoice.otherExtras, rs)}</td>
+                      <td style={{ ...tdRight, fontWeight: 700 }}>
+                        {fmtMoney(invoice.otherExtras, rs)}
+                      </td>
+                    </tr>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <tr>
+                  <td colSpan={4} style={groupHeader}>
+                    Food &amp; beverages
                   </td>
                 </tr>
                 {invoice.foodLines.map((line, i) => (
@@ -251,6 +277,8 @@ export const GuestInvoiceDocument = forwardRef<
                       {line.name}
                       <span style={{ color: MUTED, fontSize: 11, marginLeft: 8 }}>
                         {line.orderToken}
+                        {" · "}
+                        {line.paymentStatus === "paid" ? "Paid" : "Due"}
                       </span>
                     </td>
                     <td style={tdCenter}>{line.qty}</td>
@@ -259,29 +287,10 @@ export const GuestInvoiceDocument = forwardRef<
                   </tr>
                 ))}
               </>
-            ) : null}
-
-            {invoice.otherExtras > 0 ? (
-              <>
-                <tr>
-                  <td colSpan={4} style={groupHeader}>
-                    Other charges
-                  </td>
-                </tr>
-                <tr>
-                  <td style={tdLeft}>Extras / miscellaneous</td>
-                  <td style={tdCenter}>1</td>
-                  <td style={tdRight}>{fmtMoney(invoice.otherExtras, rs)}</td>
-                  <td style={{ ...tdRight, fontWeight: 700 }}>
-                    {fmtMoney(invoice.otherExtras, rs)}
-                  </td>
-                </tr>
-              </>
-            ) : null}
+            )}
           </tbody>
         </table>
 
-        {/* Totals card */}
         <div
           style={{
             marginTop: 28,
@@ -298,22 +307,25 @@ export const GuestInvoiceDocument = forwardRef<
               background: "#fff",
             }}
           >
-            <div style={totalRow}>
-              <span style={{ color: MUTED }}>Room</span>
-              <span>{fmtMoney(invoice.roomCharges, rs)}</span>
-            </div>
-            {invoice.foodTotal > 0 ? (
+            {!isFood ? (
+              <>
+                <div style={totalRow}>
+                  <span style={{ color: MUTED }}>Room</span>
+                  <span>{fmtMoney(invoice.roomCharges, rs)}</span>
+                </div>
+                {invoice.otherExtras > 0 ? (
+                  <div style={totalRow}>
+                    <span style={{ color: MUTED }}>Other</span>
+                    <span>{fmtMoney(invoice.otherExtras, rs)}</span>
+                  </div>
+                ) : null}
+              </>
+            ) : (
               <div style={totalRow}>
                 <span style={{ color: MUTED }}>Food</span>
                 <span>{fmtMoney(invoice.foodTotal, rs)}</span>
               </div>
-            ) : null}
-            {invoice.otherExtras > 0 ? (
-              <div style={totalRow}>
-                <span style={{ color: MUTED }}>Other</span>
-                <span>{fmtMoney(invoice.otherExtras, rs)}</span>
-              </div>
-            ) : null}
+            )}
             <div
               style={{
                 ...totalRow,
@@ -358,7 +370,8 @@ export const GuestInvoiceDocument = forwardRef<
           }}
         >
           <span>
-            Payment: <strong style={{ color: INK }}>{paymentStatusLabel(invoice.paymentStatus)}</strong>
+            Payment:{" "}
+            <strong style={{ color: INK }}>{paymentStatusLabel(invoice.paymentStatus)}</strong>
           </span>
           <span>·</span>
           <span>
@@ -366,18 +379,12 @@ export const GuestInvoiceDocument = forwardRef<
           </span>
           <span>·</span>
           <span>
-            Folio type:{" "}
-            <strong style={{ color: INK }}>
-              {invoice.type === "combined"
-                ? "Room + restaurant"
-                : invoice.type === "restaurant"
-                  ? "Restaurant"
-                  : "Room"}
-            </strong>
+            Invoice type:{" "}
+            <strong style={{ color: INK }}>{isFood ? "Restaurant / food" : "Room stay"}</strong>
           </span>
         </div>
 
-        {invoice.notes ? (
+        {invoice.notes && !isFood ? (
           <p
             style={{
               marginTop: 20,
@@ -409,10 +416,13 @@ export const GuestInvoiceDocument = forwardRef<
               letterSpacing: "0.04em",
             }}
           >
-            Thank you for staying with us
+            {isFood ? "Thank you for dining with us" : "Thank you for staying with us"}
           </p>
           <p style={{ margin: "8px 0 0", fontSize: 11, color: MUTED }}>
-            {hotelName} · This document is a computer-generated guest folio.
+            {hotelName} ·{" "}
+            {isFood
+              ? "Computer-generated restaurant invoice (separate from room folio)."
+              : "Computer-generated room invoice (separate from food bills)."}
           </p>
         </div>
       </div>

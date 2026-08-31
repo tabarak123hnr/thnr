@@ -38,6 +38,8 @@ function mapBooking(id: string, data: Record<string, unknown>): BookingRequest {
     nights: Number(data.nights ?? 0),
     totalBill: Number(data.totalBill ?? 0),
     channel: (data.channel as BookingChannel) || "phone",
+    bookedBy: String(data.bookedBy ?? ""),
+    reference: String(data.reference ?? ""),
     notes: String(data.notes ?? ""),
     status: (data.status as BookingRequestStatus) || "pending",
     createdAt: data.createdAt,
@@ -75,6 +77,8 @@ export async function createBookingRequest(input: {
   roomType: string;
   nightlyRate: number;
   channel: BookingChannel;
+  bookedBy?: string;
+  reference?: string;
   notes: string;
 }) {
   if (!auth.currentUser) throw new Error("You must be signed in.");
@@ -101,6 +105,8 @@ export async function createBookingRequest(input: {
     nights: bill.nights,
     totalBill: bill.totalBill,
     channel: input.channel,
+    bookedBy: (input.bookedBy ?? "").trim(),
+    reference: (input.reference ?? "").trim(),
     notes: input.notes.trim(),
     status: "pending" satisfies BookingRequestStatus,
     createdAt: serverTimestamp(),

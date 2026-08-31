@@ -18,7 +18,6 @@ export const navigation: NavSection[] = [
         icon: "Bell",
         labelKey: "notifications",
         permission: "notifications",
-        badge: 2,
         badgeTone: "danger",
       },
     ],

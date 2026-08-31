@@ -1,5 +1,5 @@
-import { Check, Pencil, Plus, UserPlus } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, ImagePlus, Pencil, Plus, UserPlus, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -9,6 +9,7 @@ import { Field, Input, PageHeader, StatCard, TextArea } from "../components/ui/P
 import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
+import { uploadImageToCloudinary } from "../lib/cloudinary";
 import { subscribeEmployees, type Employee } from "../services/employees";
 import {
   createHousekeepingTask,
@@ -81,6 +82,8 @@ const emptyForm = () => ({
 export function HousekeepingPage() {
   const { t } = useApp();
   const { success: toastSuccess, error: toastError } = useToast();
+  const dirtyPhotoRef = useRef<HTMLInputElement>(null);
+  const cleanPhotoRef = useRef<HTMLInputElement>(null);
 
   const [tasks, setTasks] = useState<HousekeepingTask[]>([]);
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
@@ -95,12 +98,19 @@ export function HousekeepingPage() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [actingId, setActingId] = useState<string | null>(null);
 
   const [assignTask, setAssignTask] = useState<HousekeepingTask | null>(null);
   const [assignEmployeeId, setAssignEmployeeId] = useState("");
   const [assignSaving, setAssignSaving] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+  const [dirtyPhotoFile, setDirtyPhotoFile] = useState<File | null>(null);
+  const [dirtyPhotoPreview, setDirtyPhotoPreview] = useState<string | null>(null);
+
+  const [doneTask, setDoneTask] = useState<HousekeepingTask | null>(null);
+  const [doneSaving, setDoneSaving] = useState(false);
+  const [doneError, setDoneError] = useState<string | null>(null);
+  const [cleanPhotoFile, setCleanPhotoFile] = useState<File | null>(null);
+  const [cleanPhotoPreview, setCleanPhotoPreview] = useState<string | null>(null);
 
   useEffect(() => {
     const a = subscribeHousekeepingTasks(setTasks);
@@ -113,14 +123,22 @@ export function HousekeepingPage() {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (dirtyPhotoPreview) URL.revokeObjectURL(dirtyPhotoPreview);
+      if (cleanPhotoPreview) URL.revokeObjectURL(cleanPhotoPreview);
+    };
+  }, [dirtyPhotoPreview, cleanPhotoPreview]);
+
   const housekeepers = useMemo(
     () =>
       employees.filter(
         (e) =>
           e.status === "active" &&
-          (e.department === "Housekeeping" ||
-            e.jobTitle.toLowerCase().includes("clean") ||
-            e.jobTitle.toLowerCase().includes("housekeep")),
+          (e.designation.toLowerCase().includes("clean") ||
+            e.designation.toLowerCase().includes("housekeep") ||
+            e.designation.toLowerCase().includes("attendant") ||
+            e.designation.toLowerCase().includes("room")),
       ),
     [employees],
   );
@@ -185,7 +203,44 @@ export function HousekeepingPage() {
     setModalOpen(true);
   }
 
+  function clearDirtyPhoto() {
+    if (dirtyPhotoPreview) URL.revokeObjectURL(dirtyPhotoPreview);
+    setDirtyPhotoFile(null);
+    setDirtyPhotoPreview(null);
+    if (dirtyPhotoRef.current) dirtyPhotoRef.current.value = "";
+  }
+
+  function clearCleanPhoto() {
+    if (cleanPhotoPreview) URL.revokeObjectURL(cleanPhotoPreview);
+    setCleanPhotoFile(null);
+    setCleanPhotoPreview(null);
+    if (cleanPhotoRef.current) cleanPhotoRef.current.value = "";
+  }
+
+  function onPickDirtyPhoto(file: File | null) {
+    if (dirtyPhotoPreview) URL.revokeObjectURL(dirtyPhotoPreview);
+    if (!file) {
+      setDirtyPhotoFile(null);
+      setDirtyPhotoPreview(null);
+      return;
+    }
+    setDirtyPhotoFile(file);
+    setDirtyPhotoPreview(URL.createObjectURL(file));
+  }
+
+  function onPickCleanPhoto(file: File | null) {
+    if (cleanPhotoPreview) URL.revokeObjectURL(cleanPhotoPreview);
+    if (!file) {
+      setCleanPhotoFile(null);
+      setCleanPhotoPreview(null);
+      return;
+    }
+    setCleanPhotoFile(file);
+    setCleanPhotoPreview(URL.createObjectURL(file));
+  }
+
   function openAssign(task: HousekeepingTask) {
+    clearDirtyPhoto();
     setAssignTask(task);
     setAssignEmployeeId(task.assigneeId || "");
     setAssignError(null);
@@ -196,6 +251,33 @@ export function HousekeepingPage() {
     setAssignTask(null);
     setAssignEmployeeId("");
     setAssignError(null);
+    clearDirtyPhoto();
+  }
+
+  function resetAssignState() {
+    setAssignTask(null);
+    setAssignEmployeeId("");
+    setAssignError(null);
+    clearDirtyPhoto();
+  }
+
+  function openMarkDone(task: HousekeepingTask) {
+    clearCleanPhoto();
+    setDoneTask(task);
+    setDoneError(null);
+  }
+
+  function closeMarkDone() {
+    if (doneSaving) return;
+    setDoneTask(null);
+    setDoneError(null);
+    clearCleanPhoto();
+  }
+
+  function resetDoneState() {
+    setDoneTask(null);
+    setDoneError(null);
+    clearCleanPhoto();
   }
 
   async function submitAssign(e: React.FormEvent) {
@@ -206,10 +288,18 @@ export function HousekeepingPage() {
       setAssignError("Pick who will clean this room.");
       return;
     }
+    if (!dirtyPhotoFile) {
+      setAssignError("Upload a photo of the dirty room before assigning.");
+      return;
+    }
 
     setAssignSaving(true);
     setAssignError(null);
     try {
+      const dirtyRoomImageUrl = await uploadImageToCloudinary(
+        dirtyPhotoFile,
+        "tabarak/housekeeping",
+      );
       await updateHousekeepingTask(assignTask.id, {
         roomId: assignTask.roomId,
         roomNumber: assignTask.roomNumber,
@@ -220,13 +310,13 @@ export function HousekeepingPage() {
         assigneeName: employee.name,
         dueAt: assignTask.dueAt,
         notes: assignTask.notes,
+        dirtyRoomImageUrl,
       });
       toastSuccess(
         "Assigned",
         `${employee.name} is cleaning Room ${assignTask.roomNumber}`,
       );
-      setAssignTask(null);
-      setAssignEmployeeId("");
+      resetAssignState();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not assign.";
       setAssignError(message);
@@ -236,28 +326,40 @@ export function HousekeepingPage() {
     }
   }
 
-  async function markDone(task: HousekeepingTask) {
-    setActingId(task.id);
+  async function submitMarkDone(e: React.FormEvent) {
+    e.preventDefault();
+    if (!doneTask) return;
+
+    setDoneSaving(true);
+    setDoneError(null);
     try {
-      await updateHousekeepingTask(task.id, {
-        roomId: task.roomId,
-        roomNumber: task.roomNumber,
-        type: task.type,
-        priority: task.priority,
+      let cleanRoomImageUrl: string | null | undefined = undefined;
+      if (cleanPhotoFile) {
+        cleanRoomImageUrl = await uploadImageToCloudinary(
+          cleanPhotoFile,
+          "tabarak/housekeeping",
+        );
+      }
+      await updateHousekeepingTask(doneTask.id, {
+        roomId: doneTask.roomId,
+        roomNumber: doneTask.roomNumber,
+        type: doneTask.type,
+        priority: doneTask.priority,
         status: "done",
-        assigneeId: task.assigneeId,
-        assigneeName: task.assigneeName || "Staff",
-        dueAt: task.dueAt,
-        notes: task.notes,
+        assigneeId: doneTask.assigneeId,
+        assigneeName: doneTask.assigneeName || "Staff",
+        dueAt: doneTask.dueAt,
+        notes: doneTask.notes,
+        ...(cleanRoomImageUrl !== undefined ? { cleanRoomImageUrl } : {}),
       });
-      toastSuccess("Marked done", `Room ${task.roomNumber} is clean`);
+      toastSuccess("Marked done", `Room ${doneTask.roomNumber} is clean`);
+      resetDoneState();
     } catch (err) {
-      toastError(
-        "Could not mark done",
-        err instanceof Error ? err.message : "Try again.",
-      );
+      const message = err instanceof Error ? err.message : "Could not mark done.";
+      setDoneError(message);
+      toastError("Could not mark done", message);
     } finally {
-      setActingId(null);
+      setDoneSaving(false);
     }
   }
 
@@ -310,7 +412,7 @@ export function HousekeepingPage() {
     <div>
       <PageHeader
         title={t.pages.housekeepingTitle}
-        subtitle='Dirty rooms show as “Needs cleaning”. Assign someone to start, then Mark done when finished.'
+        subtitle="Assign with a dirty-room photo, then Mark done (optional clean photo) when finished."
         actions={
           <>
             <div className="w-44 shrink-0">
@@ -401,9 +503,9 @@ export function HousekeepingPage() {
           <div>
             <p className="font-bold">Cleaning tasks</p>
             <p className="text-xs text-muted">
-              Use <span className="font-semibold text-app">Assign</span> to give the room to a
-              cleaner, then <span className="font-semibold text-app">Mark done</span> when the room
-              is clean.
+              <span className="font-semibold text-app">Assign</span> (dirty photo) starts cleaning.
+              Then only <span className="font-semibold text-app">Mark done</span> shows — add a clean
+              photo if you want.
             </p>
           </div>
         </div>
@@ -415,15 +517,16 @@ export function HousekeepingPage() {
             "Who is cleaning",
             "Due",
             t.status,
+            "Photos",
             t.common.actions,
           ]}
-          colWidths={["9%", "14%", "10%", "16%", "14%", "14%", "23%"]}
+          colWidths={["8%", "12%", "9%", "14%", "12%", "12%", "14%", "19%"]}
         >
           {filtered.length === 0 ? (
             <Tr>
-              <Td className="text-muted" colSpan={7}>
+              <Td className="text-muted" colSpan={8}>
                 No tasks here. When a guest checks out, a “Needs cleaning” task appears — Assign
-                someone, then Mark done.
+                someone with a dirty-room photo, then Mark done.
               </Td>
             </Tr>
           ) : (
@@ -448,28 +551,63 @@ export function HousekeepingPage() {
                   <Badge tone={statusTone[task.status]}>{statusLabel[task.status]}</Badge>
                 </Td>
                 <Td>
+                  <div className="flex gap-1.5">
+                    {task.dirtyRoomImageUrl ? (
+                      <a
+                        href={task.dirtyRoomImageUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Dirty room"
+                        className="block h-10 w-10 overflow-hidden rounded-lg border border-app"
+                      >
+                        <img
+                          src={task.dirtyRoomImageUrl}
+                          alt="Dirty room"
+                          className="h-full w-full object-cover"
+                        />
+                      </a>
+                    ) : null}
+                    {task.cleanRoomImageUrl ? (
+                      <a
+                        href={task.cleanRoomImageUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Clean room"
+                        className="block h-10 w-10 overflow-hidden rounded-lg border border-app"
+                      >
+                        <img
+                          src={task.cleanRoomImageUrl}
+                          alt="Clean room"
+                          className="h-full w-full object-cover"
+                        />
+                      </a>
+                    ) : null}
+                    {!task.dirtyRoomImageUrl && !task.cleanRoomImageUrl ? (
+                      <span className="text-xs text-muted">—</span>
+                    ) : null}
+                  </div>
+                </Td>
+                <Td>
                   <div className="flex flex-wrap gap-1.5">
-                    {task.status !== "done" ? (
+                    {task.status === "pending" ? (
                       <Button
                         size="sm"
                         variant="gold"
                         className="cursor-pointer"
                         icon={<UserPlus className="h-3.5 w-3.5" />}
-                        disabled={actingId === task.id}
                         onClick={() => openAssign(task)}
                       >
                         Assign
                       </Button>
                     ) : null}
-                    {task.status !== "done" ? (
+                    {task.status === "in_progress" ? (
                       <Button
                         size="sm"
                         className="cursor-pointer"
                         icon={<Check className="h-3.5 w-3.5" />}
-                        disabled={actingId === task.id}
-                        onClick={() => void markDone(task)}
+                        onClick={() => openMarkDone(task)}
                       >
-                        {actingId === task.id ? "…" : "Mark done"}
+                        Mark done
                       </Button>
                     ) : null}
                     <Button
@@ -495,7 +633,7 @@ export function HousekeepingPage() {
         title="Assign cleaner"
         subtitle={
           assignTask
-            ? `Room ${assignTask.roomNumber} — picking someone starts cleaning (Cleaning now).`
+            ? `Room ${assignTask.roomNumber} — upload a dirty-room photo and pick who cleans.`
             : undefined
         }
         footer={
@@ -525,18 +663,102 @@ export function HousekeepingPage() {
               options={assigneeOptions.map((e) => ({
                 value: e.id,
                 label: `${e.name} · ${e.shift}`,
+                description: e.designation || undefined,
               }))}
             />
           </SelectField>
+
+          <input
+            ref={dirtyPhotoRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => onPickDirtyPhoto(e.target.files?.[0] ?? null)}
+          />
+          <PhotoUploadSlot
+            label="Dirty room photo"
+            required
+            preview={dirtyPhotoPreview}
+            onPick={() => dirtyPhotoRef.current?.click()}
+            onClear={clearDirtyPhoto}
+          />
+
           <p className="text-sm text-muted">
-            After you assign, the task shows as <strong>Cleaning now</strong> and the room is
-            marked cleaning in progress.
+            After you assign, this task shows as <strong>Cleaning now</strong> with only{" "}
+            <strong>Mark done</strong> — Assign is hidden.
           </p>
           {!assigneeOptions.length ? (
             <p className="text-sm text-muted">
               Tip: add active staff under Employees (Housekeeping) so you can assign them.
             </p>
           ) : null}
+        </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(doneTask)}
+        onClose={closeMarkDone}
+        title="Mark room clean"
+        subtitle={
+          doneTask
+            ? `Room ${doneTask.roomNumber}${doneTask.assigneeName ? ` · ${doneTask.assigneeName}` : ""} — optionally add a clean-room photo.`
+            : undefined
+        }
+        footer={
+          <>
+            <Button type="button" variant="secondary" disabled={doneSaving} onClick={closeMarkDone}>
+              Cancel
+            </Button>
+            <Button type="submit" form="hk-done-form" disabled={doneSaving}>
+              {doneSaving ? "Saving…" : "Mark done"}
+            </Button>
+          </>
+        }
+      >
+        <form id="hk-done-form" className="space-y-4" onSubmit={(e) => void submitMarkDone(e)}>
+          {doneError ? (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+              {doneError}
+            </p>
+          ) : null}
+
+          {doneTask?.dirtyRoomImageUrl ? (
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
+                Dirty room (at assign)
+              </p>
+              <a
+                href={doneTask.dirtyRoomImageUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="block overflow-hidden rounded-xl border border-app"
+              >
+                <img
+                  src={doneTask.dirtyRoomImageUrl}
+                  alt="Dirty room"
+                  className="h-36 w-full object-cover"
+                />
+              </a>
+            </div>
+          ) : null}
+
+          <input
+            ref={cleanPhotoRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => onPickCleanPhoto(e.target.files?.[0] ?? null)}
+          />
+          <PhotoUploadSlot
+            label="Clean room photo (optional)"
+            preview={cleanPhotoPreview}
+            onPick={() => cleanPhotoRef.current?.click()}
+            onClear={clearCleanPhoto}
+          />
+
+          <p className="text-sm text-muted">
+            Room will be marked clean and available for the next guest.
+          </p>
         </form>
       </Modal>
 
@@ -620,6 +842,7 @@ export function HousekeepingPage() {
                 ...assigneeOptions.map((e) => ({
                   value: e.id,
                   label: `${e.name} · ${e.shift}`,
+                  description: e.designation || undefined,
                 })),
               ]}
             />
@@ -659,11 +882,66 @@ export function HousekeepingPage() {
 
           {!assigneeOptions.length ? (
             <p className="sm:col-span-2 text-sm text-muted">
-              Tip: add active staff under Employees (Housekeeping department) so you can assign tasks.
+              Tip: add active staff under Employees so you can assign tasks.
             </p>
           ) : null}
         </form>
       </Modal>
+    </div>
+  );
+}
+
+function PhotoUploadSlot({
+  label,
+  preview,
+  onPick,
+  onClear,
+  required,
+}: {
+  label: string;
+  preview: string | null;
+  onPick: () => void;
+  onClear: () => void;
+  required?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-dashed border-app bg-app p-3">
+      <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
+        {label}
+        {required ? <span className="text-red-600"> *</span> : null}
+      </p>
+      {preview ? (
+        <div className="space-y-2">
+          <img
+            src={preview}
+            alt={label}
+            className="h-36 w-full rounded-lg border border-app object-cover"
+          />
+          <div className="flex gap-2">
+            <Button type="button" size="sm" variant="secondary" onClick={onPick}>
+              Change
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              icon={<X className="h-3.5 w-3.5" />}
+              onClick={onClear}
+            >
+              Remove
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onPick}
+          className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-lg px-3 py-8 text-muted transition hover:text-app"
+        >
+          <ImagePlus className="h-7 w-7 opacity-50" />
+          <span className="text-xs font-semibold">Tap to upload photo</span>
+        </button>
+      )}
     </div>
   );
 }

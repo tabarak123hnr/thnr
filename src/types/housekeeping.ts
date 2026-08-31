@@ -30,6 +30,10 @@ export interface HousekeepingTask {
   assigneeName: string | null;
   dueAt: string;
   notes: string;
+  /** Photo of the dirty room, captured when assigning a cleaner */
+  dirtyRoomImageUrl: string | null;
+  /** Photo of the clean room, captured when marking the task done */
+  cleanRoomImageUrl: string | null;
   createdAt?: unknown;
   updatedAt?: unknown;
   createdBy?: string;

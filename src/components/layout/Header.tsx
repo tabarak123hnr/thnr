@@ -1,4 +1,5 @@
 import { Bell, Menu, Moon, Search, Sun, Volume2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useApp } from "../../context/app-context";
 import { Button } from "../ui/Button";
 
@@ -52,10 +53,14 @@ export function Header({ onMenu }: { onMenu: () => void }) {
         </div>
 
         <div className="hidden items-center gap-2 md:flex">
-          <Button size="md">{t.newCheckIn}</Button>
-          <Button size="md" variant="secondary">
-            {t.newOrder}
-          </Button>
+          <Link to="/check-in">
+            <Button size="md">{t.newCheckIn}</Button>
+          </Link>
+          <Link to="/counter">
+            <Button size="md" variant="secondary">
+              {t.newOrder}
+            </Button>
+          </Link>
         </div>
       </div>
     </header>
