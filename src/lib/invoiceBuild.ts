@@ -1,24 +1,28 @@
-import {
-  resolveAmountPaid,
-  resolveBalanceDue,
-} from "./paymentDisplay";
 import { calcRoomBill } from "./billing";
-import type { CheckInRecord } from "../types/checkIn";
+import type { CheckInRecord, PaymentStatus, PaymentTiming } from "../types/checkIn";
 import type { FoodOrder } from "../types/order";
 import {
   invoiceListStatus,
   type GuestInvoice,
   type InvoiceFoodLine,
-  type InvoiceType,
 } from "../types/invoice";
 
-function invoiceNumber(checkInId: string, roomNumber: string, checkInAt: string) {
-  const d = new Date(checkInAt);
-  const stamp = Number.isNaN(d.getTime())
-    ? "--------"
-    : `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  const short = checkInId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "XXXX";
-  return `INV-${roomNumber || "RM"}-${stamp}-${short}`;
+function stampFrom(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "--------";
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function shortId(checkInId: string) {
+  return checkInId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "XXXX";
+}
+
+function roomInvoiceNumber(checkInId: string, roomNumber: string, checkInAt: string) {
+  return `INV-RM-${roomNumber || "RM"}-${stampFrom(checkInAt)}-${shortId(checkInId)}`;
+}
+
+function foodInvoiceNumber(checkInId: string, roomNumber: string, checkInAt: string) {
+  return `INV-FD-${roomNumber || "RM"}-${stampFrom(checkInAt)}-${shortId(checkInId)}`;
 }
 
 function resolveBill(row: CheckInRecord) {
@@ -39,39 +43,20 @@ function resolveBill(row: CheckInRecord) {
   );
 }
 
-export function buildGuestInvoice(
-  row: CheckInRecord,
-  orders: FoodOrder[] = [],
-): GuestInvoice {
-  const bill = resolveBill(row);
-  const stayOrders = orders.filter((o) => o.checkInId === row.id);
-  const foodLines: InvoiceFoodLine[] = [];
-  for (const order of stayOrders) {
-    for (const item of order.items) {
-      foodLines.push({
-        orderToken: order.token,
-        name: item.name,
-        qty: item.qty,
-        unitPrice: item.unitPrice,
-        amount: item.lineTotal || item.qty * item.unitPrice,
-        status: order.status,
-      });
-    }
-  }
-  const foodTotal = foodLines.reduce((s, l) => s + l.amount, 0);
-  const otherExtras = Math.max(0, (bill.extraCharges || 0) - foodTotal);
+function paymentFromSplit(
+  total: number,
+  paid: number,
+): { amountPaid: number; balanceDue: number; paymentStatus: PaymentStatus } {
+  const amountPaid = Math.max(0, Math.min(total, paid));
+  const balanceDue = Math.max(0, Math.round((total - amountPaid) * 100) / 100);
+  const paymentStatus: PaymentStatus =
+    balanceDue <= 0 ? "paid" : amountPaid > 0 ? "partial" : "due";
+  return { amountPaid, balanceDue, paymentStatus };
+}
 
-  let type: InvoiceType = "room";
-  if (foodTotal > 0 && bill.roomCharges > 0) type = "combined";
-  else if (foodTotal > 0) type = "restaurant";
-
-  const totalBill = bill.totalBill;
-  const amountPaid = resolveAmountPaid({ ...row, totalBill });
-  const balanceDue = resolveBalanceDue({ ...row, totalBill });
-
+function guestBase(row: CheckInRecord) {
   return {
-    id: row.id,
-    number: invoiceNumber(row.id, row.roomNumber, row.checkInAt),
+    checkInId: row.id,
     issuedAt: new Date().toISOString(),
     guestName: row.guestName,
     phone: row.phone,
@@ -81,38 +66,143 @@ export function buildGuestInvoice(
     roomNumber: row.roomNumber,
     checkInAt: row.checkInAt,
     checkOutAt: row.checkedOutAt || row.checkOutAt,
-    nights: bill.nights,
-    nightlyRate: bill.nightlyRate,
-    roomCharges: bill.roomCharges,
-    foodLines,
-    foodTotal,
-    otherExtras,
-    extraCharges: bill.extraCharges,
-    totalBill,
-    amountPaid,
-    balanceDue,
-    paymentStatus: row.paymentStatus,
-    paymentTiming: row.paymentTiming,
     stayStatus: row.status,
-    type,
     notes: row.notes || "",
     adults: row.adults,
     children: row.children,
+    paymentTiming: row.paymentTiming,
   };
 }
 
+function buildFoodLines(orders: FoodOrder[]): InvoiceFoodLine[] {
+  const lines: InvoiceFoodLine[] = [];
+  for (const order of orders) {
+    for (const item of order.items) {
+      lines.push({
+        orderToken: order.token,
+        name: item.name,
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        amount: item.lineTotal || item.qty * item.unitPrice,
+        status: order.status,
+        paymentStatus: order.paymentStatus === "paid" ? "paid" : "due",
+      });
+    }
+  }
+  return lines;
+}
+
+/** Room stay folio only — accommodation (+ non-food extras). */
+export function buildRoomInvoice(
+  row: CheckInRecord,
+  orders: FoodOrder[] = [],
+): GuestInvoice {
+  const bill = resolveBill(row);
+  const stayOrders = orders.filter((o) => o.checkInId === row.id);
+  const foodTotal = stayOrders.reduce((s, o) => s + (o.amount || 0), 0);
+  const foodPaid = stayOrders
+    .filter((o) => o.paymentStatus === "paid")
+    .reduce((s, o) => s + (o.amount || 0), 0);
+
+  const otherExtras = Math.max(0, (bill.extraCharges || 0) - foodTotal);
+  const roomTotal = Math.max(0, bill.roomCharges + otherExtras);
+
+  const stayPaid = Math.max(0, Number(row.amountPaid) || 0);
+  // Cash first covers paid food tickets; remainder applies to the room folio
+  const roomPaidRaw = Math.max(0, stayPaid - foodPaid);
+  const split = paymentFromSplit(roomTotal, roomPaidRaw);
+
+  let paymentTiming: PaymentTiming = row.paymentTiming;
+  if (split.balanceDue <= 0) paymentTiming = "paid_at_checkin";
+  else if (split.amountPaid > 0) paymentTiming = "partial";
+  else paymentTiming = "due_on_checkout";
+
+  return {
+    ...guestBase(row),
+    id: `${row.id}-room`,
+    number: roomInvoiceNumber(row.id, row.roomNumber, row.checkInAt),
+    nights: bill.nights,
+    nightlyRate: bill.nightlyRate,
+    roomCharges: bill.roomCharges,
+    foodLines: [],
+    foodTotal: 0,
+    otherExtras,
+    extraCharges: otherExtras,
+    totalBill: roomTotal,
+    amountPaid: split.amountPaid,
+    balanceDue: split.balanceDue,
+    paymentStatus: split.paymentStatus,
+    paymentTiming,
+    type: "room",
+  };
+}
+
+/** Restaurant / room-service folio only — food orders for the stay. */
+export function buildFoodInvoice(
+  row: CheckInRecord,
+  orders: FoodOrder[] = [],
+): GuestInvoice | null {
+  const stayOrders = orders.filter((o) => o.checkInId === row.id);
+  if (!stayOrders.length) return null;
+
+  const bill = resolveBill(row);
+  const foodLines = buildFoodLines(stayOrders);
+  const foodTotal = foodLines.reduce((s, l) => s + l.amount, 0);
+  if (foodTotal <= 0) return null;
+
+  const foodPaid = stayOrders
+    .filter((o) => o.paymentStatus === "paid")
+    .reduce((s, o) => s + (o.amount || 0), 0);
+  const split = paymentFromSplit(foodTotal, foodPaid);
+
+  let paymentTiming: PaymentTiming = "due_on_checkout";
+  if (split.balanceDue <= 0) paymentTiming = "paid_at_checkin";
+  else if (split.amountPaid > 0) paymentTiming = "partial";
+
+  return {
+    ...guestBase(row),
+    id: `${row.id}-food`,
+    number: foodInvoiceNumber(row.id, row.roomNumber, row.checkInAt),
+    nights: bill.nights,
+    nightlyRate: bill.nightlyRate,
+    roomCharges: 0,
+    foodLines,
+    foodTotal,
+    otherExtras: 0,
+    extraCharges: foodTotal,
+    totalBill: foodTotal,
+    amountPaid: split.amountPaid,
+    balanceDue: split.balanceDue,
+    paymentStatus: split.paymentStatus,
+    paymentTiming,
+    type: "restaurant",
+  };
+}
+
+/**
+ * Builds separate room and food invoices (never a combined folio).
+ * Food invoice is omitted when the stay has no restaurant orders.
+ */
 export function buildGuestInvoices(
   checkIns: CheckInRecord[],
   orders: FoodOrder[],
 ): GuestInvoice[] {
-  return checkIns
-    .filter((c) => c.status !== "cancelled")
-    .map((c) => buildGuestInvoice(c, orders))
-    .sort((a, b) => {
-      const ta = new Date(a.checkInAt).getTime();
-      const tb = new Date(b.checkInAt).getTime();
-      return (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
-    });
+  const out: GuestInvoice[] = [];
+  for (const row of checkIns) {
+    if (row.status === "cancelled") continue;
+    out.push(buildRoomInvoice(row, orders));
+    const food = buildFoodInvoice(row, orders);
+    if (food) out.push(food);
+  }
+  return out.sort((a, b) => {
+    const ta = new Date(a.checkInAt).getTime();
+    const tb = new Date(b.checkInAt).getTime();
+    const byDate = (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
+    if (byDate !== 0) return byDate;
+    // Room before food for same stay
+    if (a.type !== b.type) return a.type === "room" ? -1 : 1;
+    return a.number.localeCompare(b.number);
+  });
 }
 
 export { invoiceListStatus };

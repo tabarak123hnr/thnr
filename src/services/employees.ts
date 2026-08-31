@@ -20,16 +20,21 @@ import type {
 export type { Employee, EmployeeShift, EmployeeStatus };
 
 function mapEmployee(id: string, data: Record<string, unknown>): Employee {
+  // Prefer designation; fall back to legacy jobTitle / department
+  const designation = String(
+    data.designation ?? data.jobTitle ?? data.department ?? "",
+  );
   return {
     id,
     name: String(data.name ?? ""),
     phone: String(data.phone ?? ""),
     email: String(data.email ?? ""),
-    department: String(data.department ?? ""),
-    jobTitle: String(data.jobTitle ?? ""),
+    designation,
     shift: (data.shift as EmployeeShift) || "Morning",
     status: (data.status as EmployeeStatus) || "active",
     notes: String(data.notes ?? ""),
+    cnicFrontImageUrl: data.cnicFrontImageUrl ? String(data.cnicFrontImageUrl) : null,
+    cnicBackImageUrl: data.cnicBackImageUrl ? String(data.cnicBackImageUrl) : null,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
     createdBy: data.createdBy ? String(data.createdBy) : undefined,
@@ -53,22 +58,24 @@ export async function createEmployee(input: {
   name: string;
   phone: string;
   email: string;
-  department: string;
-  jobTitle: string;
+  designation: string;
   shift: EmployeeShift;
   status: EmployeeStatus;
   notes: string;
+  cnicFrontImageUrl?: string | null;
+  cnicBackImageUrl?: string | null;
 }) {
   if (!auth.currentUser) throw new Error("You must be signed in.");
   const ref = await addDoc(collection(db, "employees"), {
     name: input.name.trim(),
     phone: input.phone.trim(),
     email: input.email.trim(),
-    department: input.department,
-    jobTitle: input.jobTitle.trim(),
+    designation: input.designation.trim(),
     shift: input.shift,
     status: input.status,
     notes: input.notes.trim(),
+    cnicFrontImageUrl: input.cnicFrontImageUrl ?? null,
+    cnicBackImageUrl: input.cnicBackImageUrl ?? null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     createdBy: auth.currentUser.uid,
@@ -82,25 +89,32 @@ export async function updateEmployee(
     name: string;
     phone: string;
     email: string;
-    department: string;
-    jobTitle: string;
+    designation: string;
     shift: EmployeeShift;
     status: EmployeeStatus;
     notes: string;
+    cnicFrontImageUrl?: string | null;
+    cnicBackImageUrl?: string | null;
   },
 ) {
   if (!auth.currentUser) throw new Error("You must be signed in.");
-  await updateDoc(doc(db, "employees", id), {
+  const patch: Record<string, unknown> = {
     name: input.name.trim(),
     phone: input.phone.trim(),
     email: input.email.trim(),
-    department: input.department,
-    jobTitle: input.jobTitle.trim(),
+    designation: input.designation.trim(),
     shift: input.shift,
     status: input.status,
     notes: input.notes.trim(),
     updatedAt: serverTimestamp(),
-  });
+  };
+  if (input.cnicFrontImageUrl !== undefined) {
+    patch.cnicFrontImageUrl = input.cnicFrontImageUrl;
+  }
+  if (input.cnicBackImageUrl !== undefined) {
+    patch.cnicBackImageUrl = input.cnicBackImageUrl;
+  }
+  await updateDoc(doc(db, "employees", id), patch);
 }
 
 export async function deleteEmployee(id: string) {

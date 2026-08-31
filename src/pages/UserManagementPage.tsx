@@ -456,12 +456,12 @@ export function UserManagementPage() {
             <Button
               type="button"
               variant="secondary"
-              className="cursor-pointer hover:scale-[1.02] hover:border-[var(--accent)]"
+              className="cursor-pointer hover:border-[var(--accent)]"
               onClick={openRoleModal}
             >
               {t.pages.addRole}
             </Button>
-            <Button type="button" className="cursor-pointer hover:scale-[1.02]" onClick={openUserModal}>
+            <Button type="button" className="cursor-pointer" onClick={openUserModal}>
               {t.pages.addUser}
             </Button>
           </>
@@ -562,7 +562,7 @@ export function UserManagementPage() {
                   <div className="flex flex-wrap gap-1.5">
                     <Button
                       size="sm"
-                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
+                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
                       icon={<Eye className="h-3.5 w-3.5" />}
                       onClick={() => openView(user)}
                     >

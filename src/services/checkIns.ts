@@ -101,6 +101,10 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
         : null,
     cnicBackImageUrl: data.cnicBackImageUrl ? String(data.cnicBackImageUrl) : null,
     notes: String(data.notes ?? ""),
+    checkedInBy: String(data.checkedInBy ?? ""),
+    vehicleColor: String(data.vehicleColor ?? ""),
+    vehicleNumber: String(data.vehicleNumber ?? ""),
+    checkedOutBy: String(data.checkedOutBy ?? ""),
     status: (data.status as CheckInStatus) || "checked_in",
     paymentTiming: (data.paymentTiming as PaymentTiming) || split.paymentTiming,
     paymentStatus,
@@ -183,6 +187,9 @@ export async function createCheckIn(input: {
   cnicBackImageUrl?: string | null;
   email?: string;
   notes: string;
+  checkedInBy?: string;
+  vehicleColor?: string;
+  vehicleNumber?: string;
   nightlyRate: number;
   extraCharges?: number;
   paymentTiming: PaymentTiming;
@@ -236,6 +243,10 @@ export async function createCheckIn(input: {
     cnicFrontImageUrl: cnicFront,
     cnicBackImageUrl: cnicBack,
     notes: input.notes.trim(),
+    checkedInBy: (input.checkedInBy ?? "").trim(),
+    vehicleColor: (input.vehicleColor ?? "").trim(),
+    vehicleNumber: (input.vehicleNumber ?? "").trim(),
+    checkedOutBy: "",
     status: "checked_in" satisfies CheckInStatus,
     paymentTiming: split.paymentTiming,
     paymentStatus: split.paymentStatus,
@@ -272,6 +283,9 @@ export async function createCheckIn(input: {
       cnicBackImageUrl: cnicBack,
       checkInId: checkInRef.id,
       notes: input.notes.trim(),
+      checkedInBy: (input.checkedInBy ?? "").trim(),
+      vehicleColor: (input.vehicleColor ?? "").trim(),
+      vehicleNumber: (input.vehicleNumber ?? "").trim(),
     },
     booking: null,
     openOrders: 0,
@@ -302,6 +316,9 @@ export async function updateCheckIn(
     cnicFrontImageUrl?: string | null;
     cnicBackImageUrl?: string | null;
     email?: string;
+    checkedInBy?: string;
+    vehicleColor?: string;
+    vehicleNumber?: string;
     paymentTiming?: PaymentTiming;
     amountPaidAtCheckIn?: number;
   },
@@ -353,6 +370,11 @@ export async function updateCheckIn(
     checkOutAt: input.checkOutAt,
     plannedCheckOutAt: input.checkOutAt,
     notes: input.notes.trim(),
+    checkedInBy: (input.checkedInBy ?? existingData?.checkedInBy ?? "").toString().trim(),
+    vehicleColor: (input.vehicleColor ?? existingData?.vehicleColor ?? "").toString().trim(),
+    vehicleNumber: (input.vehicleNumber ?? existingData?.vehicleNumber ?? "")
+      .toString()
+      .trim(),
     nightlyRate: bill.nightlyRate,
     nights: bill.nights,
     roomCharges: bill.roomCharges,
@@ -392,6 +414,11 @@ export async function updateCheckIn(
       checkOut: input.checkOutAt,
       checkInId: id,
       notes: input.notes.trim(),
+      checkedInBy: (input.checkedInBy ?? existingData?.checkedInBy ?? "").toString().trim(),
+      vehicleColor: (input.vehicleColor ?? existingData?.vehicleColor ?? "").toString().trim(),
+      vehicleNumber: (input.vehicleNumber ?? existingData?.vehicleNumber ?? "")
+        .toString()
+        .trim(),
       ...(cnicFront !== undefined
         ? { cnicImageUrl: cnicFront, cnicFrontImageUrl: cnicFront }
         : {}),
@@ -423,6 +450,8 @@ async function ensureCheckoutCleanTask(roomId: string, roomNumber: string) {
     assigneeName: null,
     dueAt: due.toISOString(),
     notes: "Auto-created after guest checkout",
+    dirtyRoomImageUrl: null,
+    cleanRoomImageUrl: null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     createdBy: auth.currentUser?.uid ?? null,
@@ -438,6 +467,8 @@ export async function checkoutGuest(
     mode?: "manual" | "automatic";
     /** When true, bill is marked paid at checkout (cash collected). */
     paymentReceived?: boolean;
+    /** Staff name who performed check-out */
+    checkedOutBy?: string;
   },
 ) {
   if (!auth.currentUser) {
@@ -491,12 +522,18 @@ export async function checkoutGuest(
       paymentReceived: alreadySettled ? true : paymentReceived,
     });
 
+    const checkedOutBy =
+      mode === "automatic"
+        ? (options?.checkedOutBy ?? "").trim() || "System"
+        : (options?.checkedOutBy ?? "").trim();
+
     await updateDoc(ref, {
       status: "checked_out",
       checkOutAt: actualOut,
       plannedCheckOutAt: plannedOut,
       checkedOutAt: actualOut,
       checkoutMode: mode,
+      checkedOutBy,
       paymentTiming:
         balanceDue <= 0
           ? amountPaidBeforeCheckout > 0 && amountPaidBeforeCheckout < bill.totalBill
@@ -637,13 +674,18 @@ export async function cancelCheckIn(id: string) {
 
 /**
  * Add/subtract food (or other) charges on an in-house stay.
- * Keeps amountPaid as-is and updates balance / payment status.
+ * `paidDelta` also adjusts amountPaid (use when food was paid at the counter).
  */
-export async function adjustCheckInExtraCharges(checkInId: string, delta: number) {
+export async function adjustCheckInExtraCharges(
+  checkInId: string,
+  delta: number,
+  options?: { paidDelta?: number },
+) {
   if (!auth.currentUser) {
     throw new Error("You must be signed in.");
   }
-  if (!checkInId || !delta) return;
+  const paidDelta = options?.paidDelta ?? 0;
+  if (!checkInId || (!delta && !paidDelta)) return;
 
   const ref = doc(db, "checkIns", checkInId);
   const snap = await getDoc(ref);
@@ -658,7 +700,7 @@ export async function adjustCheckInExtraCharges(checkInId: string, delta: number
   const nextExtra = Math.max(0, Number(data.extraCharges ?? 0) + delta);
   const bill = calcRoomBill(nightlyRate, checkInAt, checkOutAt, nextExtra);
 
-  const amountPaid = Math.max(0, Number(data.amountPaid ?? 0));
+  const amountPaid = Math.max(0, Number(data.amountPaid ?? 0) + paidDelta);
   const balanceDue = Math.max(0, bill.totalBill - amountPaid);
   const paymentStatus: PaymentStatus =
     balanceDue <= 0 ? "paid" : amountPaid > 0 ? "partial" : "due";

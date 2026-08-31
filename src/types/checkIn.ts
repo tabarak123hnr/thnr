@@ -40,6 +40,12 @@ export interface CheckInRecord {
   cnicBackImageUrl: string | null;
   email: string;
   notes: string;
+  /** Staff member who performed check-in */
+  checkedInBy: string;
+  vehicleColor: string;
+  vehicleNumber: string;
+  /** Staff member who performed check-out */
+  checkedOutBy: string;
   status: CheckInStatus;
   paymentTiming: PaymentTiming;
   paymentStatus: PaymentStatus;

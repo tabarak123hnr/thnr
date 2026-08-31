@@ -458,7 +458,7 @@ export function MenuPage() {
                   <div className="flex flex-wrap gap-1.5">
                     <Button
                       size="sm"
-                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
+                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
                       icon={<Eye className="h-3.5 w-3.5" />}
                       onClick={() => setViewRow(item)}
                     >
@@ -475,7 +475,7 @@ export function MenuPage() {
                     </Button>
                     <Button
                       size="sm"
-                      className="cursor-pointer !bg-[var(--text)] !text-[var(--bg-elevated)] hover:!opacity-90 hover:!shadow-md"
+                      className="cursor-pointer !bg-[var(--text)] !text-[var(--bg-elevated)] hover:!brightness-125"
                       disabled={actingId === item.id}
                       onClick={() => void onToggle(item)}
                     >
@@ -654,7 +654,7 @@ export function MenuPage() {
               Cancel
             </Button>
             <Button
-              className="cursor-pointer !bg-[var(--text)] !text-[var(--bg-elevated)] hover:!opacity-90 hover:!shadow-md"
+              className="cursor-pointer !bg-[var(--text)] !text-[var(--bg-elevated)] hover:!brightness-125"
               disabled={importing || !importPreview.length}
               icon={<Upload className="h-4 w-4" />}
               onClick={() => void onConfirmImport()}
@@ -748,7 +748,7 @@ export function MenuPage() {
       >
         <div className="flex flex-col gap-3 sm:flex-row">
           <Button
-            className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
+            className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
             icon={<Download className="h-4 w-4" />}
             onClick={() => runExport("csv")}
           >

@@ -9,6 +9,7 @@ import { Modal } from "../components/ui/Modal";
 import { Field, Input, PageHeader, TextArea } from "../components/ui/Page";
 import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
+import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
 import { calcRoomBill } from "../lib/billing";
 import {
@@ -107,15 +108,20 @@ const emptyForm = () => ({
   checkOutAt: defaultCheckOut(),
   roomId: "",
   channel: "phone" as BookingChannel,
+  bookedBy: "",
+  reference: "",
   notes: "",
 });
 
 export function BookingRequestsPage() {
   const { t, language } = useApp();
+  const { profile, user } = useAuth();
   const { success: toastSuccess, error: toastError } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
 
+  const staffDisplayName =
+    profile?.name || user?.displayName || user?.email?.split("@")[0] || "";
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
   const [filter, setFilter] = useState<"pending" | "reserved" | "all" | "declined">(
@@ -207,7 +213,7 @@ export function BookingRequestsPage() {
 
   function openCreate() {
     setPreferRoomId(null);
-    setForm(emptyForm());
+    setForm({ ...emptyForm(), bookedBy: staffDisplayName });
     setFormError(null);
     setCreateOpen(true);
   }
@@ -228,6 +234,7 @@ export function BookingRequestsPage() {
       ...emptyForm(),
       ...dates,
       roomId,
+      bookedBy: staffDisplayName,
     });
     setFormError(null);
     setCreateOpen(true);
@@ -283,6 +290,8 @@ export function BookingRequestsPage() {
         roomType: avail.room.type,
         nightlyRate: avail.room.rate,
         channel: form.channel,
+        bookedBy: form.bookedBy,
+        reference: form.reference,
         notes: form.notes,
       });
       setCreateOpen(false);
@@ -415,7 +424,7 @@ export function BookingRequestsPage() {
                   <div className="flex flex-wrap gap-1.5">
                     <Button
                       size="sm"
-                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
+                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
                       icon={<Eye className="h-3.5 w-3.5" />}
                       onClick={() => setViewRow(row)}
                     >
@@ -507,6 +516,8 @@ export function BookingRequestsPage() {
                 viewRow.channel
               }
             />
+            <Detail label="Booked by" value={viewRow.bookedBy || "—"} />
+            <Detail label="Reference" value={viewRow.reference || "—"} />
             <Detail
               label="Guests"
               value={`${viewRow.adults} adults · ${viewRow.children} children`}
@@ -690,6 +701,20 @@ export function BookingRequestsPage() {
                 }))}
               />
             </SelectField>
+            <Field label="Booked by">
+              <Input
+                value={form.bookedBy}
+                onChange={(e) => setForm((p) => ({ ...p, bookedBy: e.target.value }))}
+                placeholder="Staff or agent name"
+              />
+            </Field>
+            <Field label="Reference" className="sm:col-span-2">
+              <Input
+                value={form.reference}
+                onChange={(e) => setForm((p) => ({ ...p, reference: e.target.value }))}
+                placeholder="Agency / booking code (optional)"
+              />
+            </Field>
           </div>
 
           <Field label={t.common.notes}>

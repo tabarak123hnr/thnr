@@ -8,6 +8,7 @@ import { FancySelect, SelectField } from "../components/ui/FancySelect";
 import { Modal } from "../components/ui/Modal";
 import { Field, Input, PageHeader, TextArea } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
+import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
 import { calcCheckoutBill } from "../lib/billing";
 import { uploadImagesToCloudinary } from "../lib/cloudinary";
@@ -121,9 +122,13 @@ const emptyForm: RoomFormState = {
 
 export function RoomsPage() {
   const { t, language } = useApp();
+  const { profile, user } = useAuth();
   const { success: toastSuccess, error: toastError } = useToast();
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const staffDisplayName =
+    profile?.name || user?.displayName || user?.email?.split("@")[0] || "";
 
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
   const [bookingRequests, setBookingRequests] = useState<BookingRequest[]>([]);
@@ -141,6 +146,7 @@ export function RoomsPage() {
 
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [checkoutPassword, setCheckoutPassword] = useState("");
+  const [checkedOutBy, setCheckedOutBy] = useState("");
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [checkoutPaymentPaid, setCheckoutPaymentPaid] = useState(true);
@@ -245,6 +251,7 @@ export function RoomsPage() {
       return;
     }
     setCheckoutPassword("");
+    setCheckedOutBy(staffDisplayName);
     setCheckoutError(null);
     setCheckoutPaymentPaid(true);
     setCheckoutOpen(true);
@@ -254,12 +261,17 @@ export function RoomsPage() {
     if (checkoutBusy) return;
     setCheckoutOpen(false);
     setCheckoutPassword("");
+    setCheckedOutBy("");
     setCheckoutError(null);
   }
 
   async function submitCheckout(e: React.FormEvent) {
     e.preventDefault();
     if (!activeCheckIn) return;
+    if (!checkedOutBy.trim()) {
+      setCheckoutError("Enter who is checking the guest out.");
+      return;
+    }
     setCheckoutBusy(true);
     setCheckoutError(null);
     try {
@@ -267,6 +279,7 @@ export function RoomsPage() {
       const result = await checkoutGuest(activeCheckIn.id, {
         mode: "manual",
         at: new Date().toISOString(),
+        checkedOutBy: checkedOutBy.trim(),
         paymentReceived:
           (activeCheckIn.balanceDue ?? 0) <= 0 ||
           activeCheckIn.paymentStatus === "paid" ||
@@ -274,6 +287,7 @@ export function RoomsPage() {
       });
       setCheckoutOpen(false);
       setCheckoutPassword("");
+      setCheckedOutBy("");
       toastSuccess(
         "Checked out",
         result
@@ -641,6 +655,18 @@ export function RoomsPage() {
                           label={t.common.nationality}
                           value={selected.guest.nationality || "—"}
                         />
+                        <Detail
+                          label="Checked in by"
+                          value={selected.guest.checkedInBy || "—"}
+                        />
+                        <Detail
+                          label="Vehicle color"
+                          value={selected.guest.vehicleColor || "—"}
+                        />
+                        <Detail
+                          label="Vehicle number"
+                          value={selected.guest.vehicleNumber || "—"}
+                        />
                       </div>
                     ) : selected.booking || reservedRequest ? (
                       <div className="grid gap-2 sm:grid-cols-2 text-sm">
@@ -794,7 +820,7 @@ export function RoomsPage() {
               type="submit"
               form="room-checkout-form"
               variant="danger"
-              disabled={checkoutBusy || !checkoutPassword}
+              disabled={checkoutBusy || !checkoutPassword || !checkedOutBy.trim()}
             >
               {checkoutBusy ? "Checking out…" : "Check out"}
             </Button>
@@ -846,33 +872,43 @@ export function RoomsPage() {
             </div>
           ) : null}
           {activeCheckIn ? (
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-app bg-app px-4 py-3">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 accent-[var(--accent)]"
-                checked={
-                  resolveBalanceDue(activeCheckIn) <= 0 ||
-                  activeCheckIn.paymentStatus === "paid" ||
-                  checkoutPaymentPaid
-                }
-                disabled={
-                  resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
-                }
-                onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
-              />
-              <span className="min-w-0 text-sm">
-                <span className="font-bold">
-                  {resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
-                    ? "Payment paid"
-                    : "Remaining balance paid"}
+            <>
+              <Field label="Checked out by">
+                <Input
+                  required
+                  value={checkedOutBy}
+                  onChange={(e) => setCheckedOutBy(e.target.value)}
+                  placeholder="Staff name"
+                />
+              </Field>
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-app bg-app px-4 py-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-[var(--accent)]"
+                  checked={
+                    resolveBalanceDue(activeCheckIn) <= 0 ||
+                    activeCheckIn.paymentStatus === "paid" ||
+                    checkoutPaymentPaid
+                  }
+                  disabled={
+                    resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
+                  }
+                  onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
+                />
+                <span className="min-w-0 text-sm">
+                  <span className="font-bold">
+                    {resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
+                      ? "Payment paid"
+                      : "Remaining balance paid"}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted">
+                    {resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
+                      ? "Bill already settled."
+                      : "Check if the guest paid the remaining balance now."}
+                  </span>
                 </span>
-                <span className="mt-0.5 block text-xs text-muted">
-                  {resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
-                    ? "Bill already settled."
-                    : "Check if the guest paid the remaining balance now."}
-                </span>
-              </span>
-            </label>
+              </label>
+            </>
           ) : null}
           <Field label="Your password">
             <Input

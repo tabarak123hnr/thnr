@@ -37,6 +37,8 @@ function mapTask(id: string, data: Record<string, unknown>): HousekeepingTask {
     assigneeName: data.assigneeName ? String(data.assigneeName) : null,
     dueAt: String(data.dueAt ?? ""),
     notes: String(data.notes ?? ""),
+    dirtyRoomImageUrl: data.dirtyRoomImageUrl ? String(data.dirtyRoomImageUrl) : null,
+    cleanRoomImageUrl: data.cleanRoomImageUrl ? String(data.cleanRoomImageUrl) : null,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
     createdBy: data.createdBy ? String(data.createdBy) : undefined,
@@ -111,6 +113,8 @@ export async function createHousekeepingTask(input: {
     assigneeName: input.assigneeName,
     dueAt: input.dueAt,
     notes: input.notes.trim(),
+    dirtyRoomImageUrl: null,
+    cleanRoomImageUrl: null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     createdBy: auth.currentUser.uid,
@@ -135,6 +139,8 @@ export async function updateHousekeepingTask(
     assigneeName: string | null;
     dueAt: string;
     notes: string;
+    dirtyRoomImageUrl?: string | null;
+    cleanRoomImageUrl?: string | null;
   },
 ) {
   if (!auth.currentUser) throw new Error("You must be signed in.");
@@ -151,6 +157,12 @@ export async function updateHousekeepingTask(
     notes: input.notes.trim(),
     updatedAt: serverTimestamp(),
   };
+  if (input.dirtyRoomImageUrl !== undefined) {
+    patch.dirtyRoomImageUrl = input.dirtyRoomImageUrl;
+  }
+  if (input.cleanRoomImageUrl !== undefined) {
+    patch.cleanRoomImageUrl = input.cleanRoomImageUrl;
+  }
   if (input.status === "done") {
     patch.completedAt = serverTimestamp();
   }

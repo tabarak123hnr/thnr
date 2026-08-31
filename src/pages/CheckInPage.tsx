@@ -8,6 +8,7 @@ import { FancySelect, SelectField } from "../components/ui/FancySelect";
 import { Modal } from "../components/ui/Modal";
 import { Field, Input, PageHeader, TextArea } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
+import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
 import { calcCheckoutBill, calcRoomBill } from "../lib/billing";
 import { uploadImageToCloudinary } from "../lib/cloudinary";
@@ -135,6 +136,9 @@ function emptyForm() {
     checkInAt: toLocalInputValue(new Date()),
     checkOutAt: defaultCheckOut(),
     notes: "",
+    checkedInBy: "",
+    vehicleColor: "",
+    vehicleNumber: "",
     paymentTiming: "due_on_checkout" as PaymentTiming,
     amountPaidAtCheckIn: "",
   };
@@ -192,11 +196,15 @@ function BillSummary({
 
 export function CheckInPage() {
   const { t, language } = useApp();
+  const { profile, user } = useAuth();
   const { success: toastSuccess, error: toastError } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
   const cnicFrontRef = useRef<HTMLInputElement>(null);
   const cnicBackRef = useRef<HTMLInputElement>(null);
+
+  const staffDisplayName =
+    profile?.name || user?.displayName || user?.email?.split("@")[0] || "";
 
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
   const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
@@ -216,6 +224,7 @@ export function CheckInPage() {
   const [verifyingPassword, setVerifyingPassword] = useState(false);
   const [checkingOutId, setCheckingOutId] = useState<string | null>(null);
   const [checkoutPaymentPaid, setCheckoutPaymentPaid] = useState(true);
+  const [checkedOutBy, setCheckedOutBy] = useState("");
 
   const [form, setForm] = useState(emptyForm);
   const [companions, setCompanions] = useState<CompanionForm[]>([]);
@@ -298,7 +307,7 @@ export function CheckInPage() {
 
   function openCreate() {
     resetMedia();
-    setForm(emptyForm());
+    setForm({ ...emptyForm(), checkedInBy: staffDisplayName });
     setCompanions([]);
     setNightlyRate(0);
     setExtraCharges(0);
@@ -340,6 +349,7 @@ export function CheckInPage() {
       phone: booking?.phone || "",
       checkInAt,
       checkOutAt,
+      checkedInBy: staffDisplayName,
     });
     setCompanions([]);
     setNightlyRate(room.rate);
@@ -375,6 +385,9 @@ export function CheckInPage() {
       checkInAt: isoToLocalInput(row.checkInAt),
       checkOutAt: isoToLocalInput(row.checkOutAt),
       notes: row.notes || "",
+      checkedInBy: row.checkedInBy || staffDisplayName,
+      vehicleColor: row.vehicleColor || "",
+      vehicleNumber: row.vehicleNumber || "",
       paymentTiming: row.paymentTiming || "due_on_checkout",
       amountPaidAtCheckIn:
         row.paymentTiming === "partial" || (row.amountPaid > 0 && row.balanceDue > 0)
@@ -422,6 +435,7 @@ export function CheckInPage() {
     if (resolveBalanceDue(row) > 0 && row.paymentStatus !== "paid") {
       setCheckoutPaymentPaid(true);
     }
+    setCheckedOutBy(staffDisplayName);
     setPasswordModal(true);
   }
 
@@ -453,6 +467,7 @@ export function CheckInPage() {
     setPendingEdit(null);
     setSecureAction(null);
     setPasswordError(null);
+    setCheckedOutBy("");
   }
 
   async function submitPasswordGate(e: React.FormEvent) {
@@ -499,12 +514,17 @@ export function CheckInPage() {
       }
 
       // checkout
+      if (!checkedOutBy.trim()) {
+        setPasswordError("Enter who is checking the guest out.");
+        return;
+      }
       const nowIso = new Date().toISOString();
       setCheckingOutId(row.id);
       try {
         const result = await checkoutGuest(row.id, {
           mode: "manual",
           at: nowIso,
+          checkedOutBy: checkedOutBy.trim(),
           paymentReceived:
             resolveBalanceDue(row) <= 0 ||
             row.paymentStatus === "paid" ||
@@ -513,6 +533,7 @@ export function CheckInPage() {
         setPasswordModal(false);
         setPendingEdit(null);
         setSecureAction(null);
+        setCheckedOutBy("");
         if (result) {
           toastSuccess(
             "Checked out",
@@ -597,6 +618,10 @@ export function CheckInPage() {
       setFormError("Check-out must be after check-in.");
       return;
     }
+    if (!form.checkedInBy.trim()) {
+      setFormError("Enter who is checking the guest in.");
+      return;
+    }
 
     const adults = Math.max(1, Number(form.adults) || 1);
     const children = Math.max(0, Number(form.children) || 0);
@@ -660,6 +685,9 @@ export function CheckInPage() {
           checkInAt,
           checkOutAt,
           notes: form.notes,
+          checkedInBy: form.checkedInBy,
+          vehicleColor: form.vehicleColor,
+          vehicleNumber: form.vehicleNumber,
           nightlyRate: rate,
           extraCharges,
           cnicFrontImageUrl: cnicFrontUrl ?? null,
@@ -688,6 +716,9 @@ export function CheckInPage() {
           cnicFrontImageUrl: cnicFrontUrl ?? null,
           cnicBackImageUrl: cnicBackUrl ?? null,
           notes: form.notes,
+          checkedInBy: form.checkedInBy,
+          vehicleColor: form.vehicleColor,
+          vehicleNumber: form.vehicleNumber,
           nightlyRate: rate,
           extraCharges,
           paymentTiming: form.paymentTiming,
@@ -866,7 +897,7 @@ export function CheckInPage() {
                   <Button
                     type="button"
                     size="sm"
-                    className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
+                    className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
                     icon={<Eye className="h-3.5 w-3.5" />}
                     onClick={() => setViewRow(row)}
                   >
@@ -977,6 +1008,12 @@ export function CheckInPage() {
               <Detail label="Purpose" value={viewRow.purpose} />
               <Detail label="Payment" value={paymentStatusLabel(viewRow.paymentStatus)} />
               <Detail label="Payment plan" value={paymentPlanLabel(viewRow.paymentTiming)} />
+              <Detail label="Checked in by" value={viewRow.checkedInBy || "—"} />
+              <Detail label="Vehicle color" value={viewRow.vehicleColor || "—"} />
+              <Detail label="Vehicle number" value={viewRow.vehicleNumber || "—"} />
+              {viewRow.status === "checked_out" ? (
+                <Detail label="Checked out by" value={viewRow.checkedOutBy || "—"} />
+              ) : null}
               <Detail
                 label="Paid so far"
                 value={formatRs(resolveAmountPaid(viewRow), t.common.rs)}
@@ -1173,35 +1210,45 @@ export function CheckInPage() {
           )}
 
           {secureAction === "checkout" && pendingEdit ? (
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-app bg-app px-4 py-3">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 accent-[var(--accent)]"
-                checked={
-                  resolveBalanceDue(pendingEdit) <= 0 ||
-                  pendingEdit.paymentStatus === "paid" ||
-                  checkoutPaymentPaid
-                }
-                disabled={
-                  resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
-                }
-                onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
-              />
-              <span className="min-w-0 text-sm">
-                <span className="font-bold text-app">
-                  {resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
-                    ? "Payment paid"
-                    : "Remaining balance paid"}
+            <>
+              <Field label="Checked out by">
+                <Input
+                  required
+                  value={checkedOutBy}
+                  onChange={(e) => setCheckedOutBy(e.target.value)}
+                  placeholder="Staff name"
+                />
+              </Field>
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-app bg-app px-4 py-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-[var(--accent)]"
+                  checked={
+                    resolveBalanceDue(pendingEdit) <= 0 ||
+                    pendingEdit.paymentStatus === "paid" ||
+                    checkoutPaymentPaid
+                  }
+                  disabled={
+                    resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
+                  }
+                  onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
+                />
+                <span className="min-w-0 text-sm">
+                  <span className="font-bold text-app">
+                    {resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
+                      ? "Payment paid"
+                      : "Remaining balance paid"}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted">
+                    {resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
+                      ? "Bill already settled — stays marked paid."
+                      : checkoutPaymentPaid
+                        ? "Collect the remaining balance now — list will show Paid."
+                        : "Leave unchecked if the remaining balance is still outstanding (Due)."}
+                  </span>
                 </span>
-                <span className="mt-0.5 block text-xs text-muted">
-                  {resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
-                    ? "Bill already settled — stays marked paid."
-                    : checkoutPaymentPaid
-                      ? "Collect the remaining balance now — list will show Paid."
-                      : "Leave unchecked if the remaining balance is still outstanding (Due)."}
-                </span>
-              </span>
-            </label>
+              </label>
+            </>
           ) : null}
 
           <Field label="Your password">
@@ -1509,6 +1556,36 @@ export function CheckInPage() {
                   setExistingCnicBackUrl(null);
                 }}
               />
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-3 text-xs font-bold uppercase tracking-wide text-muted">
+              Staff & vehicle
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Checked in by">
+                <Input
+                  required
+                  value={form.checkedInBy}
+                  onChange={(e) => setForm((p) => ({ ...p, checkedInBy: e.target.value }))}
+                  placeholder="Staff name"
+                />
+              </Field>
+              <Field label="Vehicle color">
+                <Input
+                  value={form.vehicleColor}
+                  onChange={(e) => setForm((p) => ({ ...p, vehicleColor: e.target.value }))}
+                  placeholder="e.g. White"
+                />
+              </Field>
+              <Field label="Vehicle number" className="sm:col-span-2">
+                <Input
+                  value={form.vehicleNumber}
+                  onChange={(e) => setForm((p) => ({ ...p, vehicleNumber: e.target.value }))}
+                  placeholder="e.g. LEA-1234"
+                />
+              </Field>
             </div>
           </div>
 

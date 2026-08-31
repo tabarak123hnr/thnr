@@ -30,6 +30,9 @@ export interface RoomGuestInfo {
   cnicBackImageUrl?: string | null;
   checkInId?: string;
   notes?: string;
+  checkedInBy?: string;
+  vehicleColor?: string;
+  vehicleNumber?: string;
 }
 
 export interface RoomBookingInfo {

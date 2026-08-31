@@ -17,11 +17,12 @@ import {
   calcOrderAmount,
   type FoodOrder,
   type FoodOrderItem,
+  type FoodOrderPaymentStatus,
   type FoodOrderStatus,
 } from "../types/order";
 import { adjustCheckInExtraCharges } from "./checkIns";
 
-export type { FoodOrder, FoodOrderItem, FoodOrderStatus };
+export type { FoodOrder, FoodOrderItem, FoodOrderPaymentStatus, FoodOrderStatus };
 
 function mapOrder(id: string, data: Record<string, unknown>): FoodOrder {
   const items = Array.isArray(data.items)
@@ -39,6 +40,10 @@ function mapOrder(id: string, data: Record<string, unknown>): FoodOrder {
       })
     : [];
 
+  const paymentRaw = String(data.paymentStatus ?? "due");
+  const paymentStatus: FoodOrderPaymentStatus =
+    paymentRaw === "paid" ? "paid" : "due";
+
   return {
     id,
     token: String(data.token ?? id.slice(0, 6).toUpperCase()),
@@ -49,6 +54,7 @@ function mapOrder(id: string, data: Record<string, unknown>): FoodOrder {
     items,
     amount: Number(data.amount) || calcOrderAmount(items),
     status: (data.status as FoodOrderStatus) || "pending",
+    paymentStatus,
     notes: String(data.notes ?? ""),
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
@@ -129,6 +135,8 @@ export async function createFoodOrder(input: {
     qty: number;
   }[];
   notes?: string;
+  /** Default due — add to guest bill. Paid = cash collected now. */
+  paymentStatus?: FoodOrderPaymentStatus;
 }) {
   if (!auth.currentUser) {
     throw new Error("You must be signed in to place an order.");
@@ -149,6 +157,8 @@ export async function createFoodOrder(input: {
 
   const amount = calcOrderAmount(items);
   const token = nextToken();
+  const paymentStatus: FoodOrderPaymentStatus =
+    input.paymentStatus === "paid" ? "paid" : "due";
 
   const ref = await addDoc(collection(db, "orders"), {
     token,
@@ -159,6 +169,7 @@ export async function createFoodOrder(input: {
     items,
     amount,
     status: "pending" as FoodOrderStatus,
+    paymentStatus,
     notes: (input.notes ?? "").trim(),
     deliveredAt: null,
     createdAt: serverTimestamp(),
@@ -166,7 +177,9 @@ export async function createFoodOrder(input: {
     createdBy: auth.currentUser.uid,
   });
 
-  await adjustCheckInExtraCharges(input.checkInId, amount);
+  await adjustCheckInExtraCharges(input.checkInId, amount, {
+    paidDelta: paymentStatus === "paid" ? amount : 0,
+  });
   await bumpRoomOpenOrders(input.roomId, 1);
 
   return ref.id;
@@ -208,7 +221,45 @@ export async function updateFoodOrder(
   });
 
   if (delta !== 0 && prev.checkInId) {
-    await adjustCheckInExtraCharges(prev.checkInId, delta);
+    await adjustCheckInExtraCharges(prev.checkInId, delta, {
+      paidDelta: prev.paymentStatus === "paid" ? delta : 0,
+    });
+  }
+}
+
+export async function markOrderPayment(
+  id: string,
+  paymentStatus: FoodOrderPaymentStatus,
+) {
+  if (!auth.currentUser) {
+    throw new Error("You must be signed in.");
+  }
+
+  const ref = doc(db, "orders", id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Order not found.");
+
+  const prev = mapOrder(id, snap.data() as Record<string, unknown>);
+  if (prev.paymentStatus === paymentStatus) return;
+
+  await updateDoc(ref, {
+    paymentStatus,
+    updatedAt: serverTimestamp(),
+  });
+
+  if (!prev.checkInId || !prev.amount) return;
+
+  // due → paid: guest paid this ticket now
+  // paid → due: reverse the cash against the stay
+  const paidDelta =
+    paymentStatus === "paid" && prev.paymentStatus === "due"
+      ? prev.amount
+      : paymentStatus === "due" && prev.paymentStatus === "paid"
+        ? -prev.amount
+        : 0;
+
+  if (paidDelta) {
+    await adjustCheckInExtraCharges(prev.checkInId, 0, { paidDelta });
   }
 }
 
@@ -247,7 +298,9 @@ export async function deleteFoodOrder(id: string) {
   await deleteDoc(ref);
 
   if (prev.checkInId && prev.amount) {
-    await adjustCheckInExtraCharges(prev.checkInId, -prev.amount);
+    await adjustCheckInExtraCharges(prev.checkInId, -prev.amount, {
+      paidDelta: prev.paymentStatus === "paid" ? -prev.amount : 0,
+    });
   }
   if (prev.status === "pending") {
     await bumpRoomOpenOrders(prev.roomId, -1);

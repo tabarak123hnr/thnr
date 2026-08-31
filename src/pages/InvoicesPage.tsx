@@ -19,7 +19,7 @@ import {
   type CheckInRecord,
 } from "../services/checkIns";
 import { fetchOrders, subscribeOrders, type FoodOrder } from "../services/orders";
-import type { GuestInvoice, InvoiceListStatus } from "../types/invoice";
+import type { GuestInvoice, InvoiceListStatus, InvoiceType } from "../types/invoice";
 
 const hotelName =
   (import.meta.env.VITE_HOTEL_NAME as string | undefined) ||
@@ -48,10 +48,12 @@ function formatDate(iso: string) {
   });
 }
 
-function typeLabel(type: GuestInvoice["type"]) {
-  if (type === "combined") return "Room + food";
-  if (type === "restaurant") return "Restaurant";
-  return "Room";
+function typeLabel(type: InvoiceType) {
+  return type === "restaurant" ? "Food" : "Room";
+}
+
+function typeTone(type: InvoiceType): "gold" | "info" {
+  return type === "restaurant" ? "info" : "gold";
 }
 
 export function InvoicesPage() {
@@ -61,6 +63,7 @@ export function InvoicesPage() {
   const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
   const [orders, setOrders] = useState<FoodOrder[]>([]);
   const [statusFilter, setStatusFilter] = useState<"all" | InvoiceListStatus>("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | InvoiceType>("all");
   const [openInvoice, setOpenInvoice] = useState<GuestInvoice | null>(null);
   const [busy, setBusy] = useState<"print" | "pdf" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -81,7 +84,6 @@ export function InvoicesPage() {
     [checkIns, orders],
   );
 
-  // Keep open invoice in sync after refresh / live updates
   useEffect(() => {
     if (!openInvoice) return;
     const next = invoices.find((inv) => inv.id === openInvoice.id);
@@ -89,11 +91,16 @@ export function InvoicesPage() {
   }, [invoices, openInvoice?.id]);
 
   const filtered = useMemo(() => {
-    if (statusFilter === "all") return invoices;
-    return invoices.filter((inv) => invoiceListStatus(inv) === statusFilter);
-  }, [invoices, statusFilter]);
+    return invoices.filter((inv) => {
+      if (typeFilter !== "all" && inv.type !== typeFilter) return false;
+      if (statusFilter !== "all" && invoiceListStatus(inv) !== statusFilter) return false;
+      return true;
+    });
+  }, [invoices, statusFilter, typeFilter]);
 
   const stats = useMemo(() => {
+    const room = invoices.filter((i) => i.type === "room");
+    const food = invoices.filter((i) => i.type === "restaurant");
     let collected = 0;
     let openBalance = 0;
     let unpaidCount = 0;
@@ -103,7 +110,14 @@ export function InvoicesPage() {
       const s = invoiceListStatus(inv);
       if (s === "unpaid" || s === "partial") unpaidCount += 1;
     }
-    return { collected, openBalance, unpaidCount, total: invoices.length };
+    return {
+      roomCount: room.length,
+      foodCount: food.length,
+      collected,
+      openBalance,
+      unpaidCount,
+      total: invoices.length,
+    };
   }, [invoices]);
 
   async function onRefresh() {
@@ -188,7 +202,7 @@ export function InvoicesPage() {
     <div>
       <PageHeader
         title={t.pages.invoicesTitle}
-        subtitle="Guest folios from check-ins — room stay plus restaurant orders on the bill."
+        subtitle="Separate room and food invoices — each stay can have both, never mixed on one bill."
         actions={
           <>
             <Button
@@ -216,8 +230,9 @@ export function InvoicesPage() {
         }
       />
 
-      <div className="mb-4 grid gap-4 sm:grid-cols-3">
-        <StatCard label="Folios" value={String(stats.total)} />
+      <div className="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Room invoices" value={String(stats.roomCount)} />
+        <StatCard label="Food invoices" value={String(stats.foodCount)} />
         <StatCard
           label="Collected"
           value={formatRs(stats.collected, t.common.rs)}
@@ -230,10 +245,29 @@ export function InvoicesPage() {
         />
       </div>
 
+      <div className="mb-3 flex flex-wrap gap-2">
+        {(
+          [
+            ["all", "All types"],
+            ["room", "Room"],
+            ["restaurant", "Food"],
+          ] as const
+        ).map(([value, label]) => (
+          <Button
+            key={value}
+            size="sm"
+            variant={typeFilter === value ? "gold" : "secondary"}
+            onClick={() => setTypeFilter(value)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+
       <div className="mb-4 flex flex-wrap gap-2">
         {(
           [
-            ["all", "All"],
+            ["all", "All status"],
             ["unpaid", "Unpaid"],
             ["partial", "Partial"],
             ["paid", "Paid"],
@@ -252,7 +286,7 @@ export function InvoicesPage() {
 
       <Card>
         {filtered.length === 0 ? (
-          <EmptyState message="No invoices yet. Check in a guest to generate a folio." />
+          <EmptyState message="No invoices yet. Check in a guest for a room invoice; food invoices appear after counter orders." />
         ) : (
           <Table
             headers={[
@@ -278,7 +312,7 @@ export function InvoicesPage() {
                     <div className="text-xs text-muted">Room {inv.roomNumber}</div>
                   </Td>
                   <Td>
-                    <Badge tone="muted">{typeLabel(inv.type)}</Badge>
+                    <Badge tone={typeTone(inv.type)}>{typeLabel(inv.type)}</Badge>
                   </Td>
                   <Td className="text-muted">{formatDate(inv.checkInAt)}</Td>
                   <Td className="font-semibold">
@@ -291,7 +325,7 @@ export function InvoicesPage() {
                   <Td>
                     <Button
                       size="sm"
-                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
+                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
                       icon={<Eye className="h-3.5 w-3.5" />}
                       onClick={() => setOpenInvoice(inv)}
                     >
@@ -311,7 +345,7 @@ export function InvoicesPage() {
         title={openInvoice?.number ?? "Invoice"}
         subtitle={
           openInvoice
-            ? `${openInvoice.guestName} · Room ${openInvoice.roomNumber}`
+            ? `${openInvoice.guestName} · Room ${openInvoice.roomNumber} · ${typeLabel(openInvoice.type)}`
             : undefined
         }
         wide

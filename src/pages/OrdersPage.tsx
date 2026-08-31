@@ -1,51 +1,53 @@
-import { Check, Eye, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, Clock3, Eye, Trash2, UtensilsCrossed } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { FancySelect, SelectField } from "../components/ui/FancySelect";
 import { Modal } from "../components/ui/Modal";
-import { EmptyState, Field, Input, PageHeader, StatCard, TextArea } from "../components/ui/Page";
-import { Table, Td, Tr } from "../components/ui/Table";
+import { EmptyState, PageHeader, StatCard } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
-import { formatRs } from "../lib/utils";
-import { subscribeCheckIns, type CheckInRecord } from "../services/checkIns";
-import { subscribeMenuItems, type MenuItem } from "../services/menu";
+import { cn, formatRs } from "../lib/utils";
 import {
-  createFoodOrder,
   deleteFoodOrder,
   markOrderDelivered,
+  markOrderPayment,
   subscribeOrders,
-  updateFoodOrder,
   type FoodOrder,
-  type FoodOrderStatus,
 } from "../services/orders";
-import { calcOrderAmount } from "../types/order";
 
-type LineDraft = {
-  menuItemId: string;
-  name: string;
-  nameUr?: string;
-  unitPrice: number;
-  qty: number;
-};
+function createdAtMs(value: unknown): number {
+  if (!value) return 0;
+  if (typeof value === "string") {
+    const t = new Date(value).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  }
+  if (typeof value === "object" && value !== null && "toDate" in value) {
+    return (value as { toDate: () => Date }).toDate().getTime();
+  }
+  if (typeof value === "object" && value !== null && "seconds" in value) {
+    return Number((value as { seconds: number }).seconds) * 1000;
+  }
+  return 0;
+}
 
-const emptyForm = () => ({
-  checkInId: "",
-  notes: "",
-  lines: [] as LineDraft[],
-});
+function waitMinutes(createdAt: unknown) {
+  const ms = createdAtMs(createdAt);
+  if (!ms) return 0;
+  return Math.max(0, Math.floor((Date.now() - ms) / 60000));
+}
+
+function formatWaitLabel(mins: number) {
+  if (mins < 1) return "Just in";
+  if (mins < 60) return `${mins} min`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
 
 function formatWhen(value: unknown) {
-  if (!value) return "—";
-  let d: Date;
-  if (typeof value === "string") d = new Date(value);
-  else if (typeof value === "object" && value !== null && "toDate" in value) {
-    d = (value as { toDate: () => Date }).toDate();
-  } else return "—";
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, {
+  const ms = createdAtMs(value);
+  if (!ms) return "—";
+  return new Date(ms).toLocaleString(undefined, {
     day: "numeric",
     month: "short",
     hour: "numeric",
@@ -53,206 +55,70 @@ function formatWhen(value: unknown) {
   });
 }
 
+function waitTone(mins: number): "success" | "warning" | "danger" | "info" {
+  if (mins >= 25) return "danger";
+  if (mins >= 12) return "warning";
+  return "info";
+}
+
 export function OrdersPage() {
   const { t, language } = useApp();
   const { success: toastSuccess, error: toastError } = useToast();
 
   const [orders, setOrders] = useState<FoodOrder[]>([]);
-  const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
-  const [catalog, setCatalog] = useState<MenuItem[]>([]);
-  const [statusFilter, setStatusFilter] = useState<"all" | FoodOrderStatus>("all");
-
-  const [formOpen, setFormOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(emptyForm);
-  const [menuPick, setMenuPick] = useState("");
-  const [qtyPick, setQtyPick] = useState("1");
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [viewRow, setViewRow] = useState<FoodOrder | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
   const [deleteRow, setDeleteRow] = useState<FoodOrder | null>(null);
 
   useEffect(() => {
-    const a = subscribeOrders(setOrders);
-    const b = subscribeCheckIns(setCheckIns);
-    const c = subscribeMenuItems(setCatalog);
-    return () => {
-      a();
-      b();
-      c();
-    };
+    return subscribeOrders(setOrders);
   }, []);
 
-  const inHouse = useMemo(
-    () => checkIns.filter((c) => c.status === "checked_in"),
-    [checkIns],
-  );
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
-  const roomOptions = useMemo(
-    () =>
-      inHouse.map((c) => ({
-        value: c.id,
-        label: `Room ${c.roomNumber} · ${c.guestName}`,
-      })),
-    [inHouse],
-  );
+  const active = useMemo(() => {
+    void nowTick;
+    return orders
+      .filter((o) => o.status === "pending")
+      .sort((a, b) => createdAtMs(a.createdAt) - createdAtMs(b.createdAt));
+  }, [orders, nowTick]);
 
-  const availableMenu = useMemo(
-    () => catalog.filter((m) => m.available),
-    [catalog],
-  );
-
-  const menuOptions = useMemo(
-    () =>
-      availableMenu.map((m) => ({
-        value: m.id,
-        label: `${language === "ur" ? m.nameUr : m.name} · ${formatRs(m.price, t.common.rs)}`,
-      })),
-    [availableMenu, language, t.common.rs],
-  );
-
-  const filtered = useMemo(() => {
-    if (statusFilter === "all") return orders;
-    return orders.filter((o) => o.status === statusFilter);
-  }, [orders, statusFilter]);
-
-  const pendingCount = orders.filter((o) => o.status === "pending").length;
-  const deliveredCount = orders.filter((o) => o.status === "delivered").length;
-  const pendingAmount = orders
-    .filter((o) => o.status === "pending")
+  const pendingAmount = active.reduce((s, o) => s + o.amount, 0);
+  const dueAmount = active
+    .filter((o) => o.paymentStatus === "due")
     .reduce((s, o) => s + o.amount, 0);
-
-  const formTotal = calcOrderAmount(form.lines);
-
-  const selectedStay = inHouse.find((c) => c.id === form.checkInId);
-
-  function openCreate() {
-    setEditingId(null);
-    setForm(emptyForm());
-    setMenuPick("");
-    setQtyPick("1");
-    setFormError(null);
-    setFormOpen(true);
-  }
-
-  function openEdit(row: FoodOrder) {
-    setEditingId(row.id);
-    setForm({
-      checkInId: row.checkInId,
-      notes: row.notes,
-      lines: row.items.map((i) => ({
-        menuItemId: i.menuItemId,
-        name: i.name,
-        nameUr: i.nameUr,
-        unitPrice: i.unitPrice,
-        qty: i.qty,
-      })),
-    });
-    setMenuPick("");
-    setQtyPick("1");
-    setFormError(null);
-    setFormOpen(true);
-  }
-
-  function addLine() {
-    const item = availableMenu.find((m) => m.id === menuPick);
-    if (!item) return;
-    const addQty = Math.max(1, Math.floor(Number(qtyPick) || 1));
-    setForm((p) => {
-      const existing = p.lines.find((l) => l.menuItemId === item.id);
-      if (existing) {
-        return {
-          ...p,
-          lines: p.lines.map((l) =>
-            l.menuItemId === item.id ? { ...l, qty: l.qty + addQty } : l,
-          ),
-        };
-      }
-      return {
-        ...p,
-        lines: [
-          ...p.lines,
-          {
-            menuItemId: item.id,
-            name: item.name,
-            nameUr: item.nameUr,
-            unitPrice: item.price,
-            qty: addQty,
-          },
-        ],
-      };
-    });
-    setMenuPick("");
-    setQtyPick("1");
-  }
-
-  function setQty(menuItemId: string, qty: number) {
-    setForm((p) => ({
-      ...p,
-      lines: p.lines
-        .map((l) => (l.menuItemId === menuItemId ? { ...l, qty: Math.max(0, qty) } : l))
-        .filter((l) => l.qty > 0),
-    }));
-  }
-
-  async function onSave() {
-    setFormError(null);
-    if (!editingId && !form.checkInId) {
-      setFormError("Select the guest room — food is billed to that stay.");
-      return;
-    }
-    if (!form.lines.length) {
-      setFormError("Add at least one dish.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      if (editingId) {
-        await updateFoodOrder(editingId, {
-          items: form.lines,
-          notes: form.notes,
-        });
-        toastSuccess("Order updated", "Guest bill extras were adjusted.");
-      } else {
-        const stay = inHouse.find((c) => c.id === form.checkInId);
-        if (!stay) {
-          setFormError("That room is no longer checked in.");
-          return;
-        }
-        await createFoodOrder({
-          roomId: stay.roomId,
-          roomNumber: stay.roomNumber,
-          checkInId: stay.id,
-          guestName: stay.guestName,
-          items: form.lines,
-          notes: form.notes,
-        });
-        toastSuccess(
-          "Order placed",
-          `Room ${stay.roomNumber} · ${formatRs(formTotal, t.common.rs)} added to guest bill`,
-        );
-      }
-      setFormOpen(false);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not save order.";
-      setFormError(message);
-      toastError("Order failed", message);
-    } finally {
-      setSaving(false);
-    }
-  }
+  const urgentCount = active.filter((o) => waitMinutes(o.createdAt) >= 12).length;
+  const roomsWaiting = new Set(active.map((o) => o.roomNumber)).size;
 
   async function onDeliver(row: FoodOrder) {
     setActingId(row.id);
     try {
       await markOrderDelivered(row.id);
       toastSuccess("Delivered", `${row.token} · Room ${row.roomNumber}`);
+      if (viewRow?.id === row.id) setViewRow(null);
     } catch (err) {
       toastError(
         "Could not mark delivered",
+        err instanceof Error ? err.message : "Try again.",
+      );
+    } finally {
+      setActingId(null);
+    }
+  }
+
+  async function onMarkPaid(row: FoodOrder) {
+    if (row.paymentStatus === "paid") return;
+    setActingId(row.id);
+    try {
+      await markOrderPayment(row.id, "paid");
+      toastSuccess("Marked paid", `${row.token} · ${formatRs(row.amount, t.common.rs)}`);
+    } catch (err) {
+      toastError(
+        "Could not update payment",
         err instanceof Error ? err.message : "Try again.",
       );
     } finally {
@@ -265,7 +131,8 @@ export function OrdersPage() {
     setActingId(deleteRow.id);
     try {
       await deleteFoodOrder(deleteRow.id);
-      toastSuccess("Order deleted", "Amount removed from guest bill extras.");
+      toastSuccess("Order removed", "Amount removed from guest bill extras.");
+      if (viewRow?.id === deleteRow.id) setViewRow(null);
       setDeleteRow(null);
     } catch (err) {
       toastError(
@@ -281,311 +148,199 @@ export function OrdersPage() {
     <div>
       <PageHeader
         title={t.pages.ordersTitle}
-        subtitle="Orders are tied to the room’s active check-in so food is added to that guest’s bill (room + extras)."
+        subtitle={t.pages.ordersSub}
         actions={
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" />
-            {t.newOrder}
-          </Button>
+          <Link to="/counter">
+            <Button icon={<UtensilsCrossed className="h-4 w-4" />}>Open counter</Button>
+          </Link>
         }
       />
 
       <div className="mb-5 grid gap-3 sm:grid-cols-3">
         <StatCard
-          label="Pending"
-          value={String(pendingCount)}
-          hint={formatRs(pendingAmount, t.common.rs)}
-          alert={pendingCount || undefined}
+          label="Active tickets"
+          value={String(active.length)}
+          hint="Waiting to be delivered"
+          alert={active.length || undefined}
         />
-        <StatCard label="Delivered" value={String(deliveredCount)} />
         <StatCard
-          label="In-house rooms"
-          value={String(inHouse.length)}
-          hint="Can place room service"
+          label="Kitchen value"
+          value={formatRs(pendingAmount, t.common.rs)}
+          hint={`${roomsWaiting} room${roomsWaiting === 1 ? "" : "s"}`}
+        />
+        <StatCard
+          label="Payment still due"
+          value={formatRs(dueAmount, t.common.rs)}
+          hint={urgentCount ? `${urgentCount} running late` : "Unpaid food tickets"}
+          alert={dueAmount > 0 ? 1 : undefined}
         />
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {(
-          [
-            ["all", "All"],
-            ["pending", "Pending"],
-            ["delivered", "Delivered"],
-          ] as const
-        ).map(([value, label]) => (
-          <Button
-            key={value}
-            size="sm"
-            variant={statusFilter === value ? "primary" : "secondary"}
-            onClick={() => setStatusFilter(value)}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
+      {active.length === 0 ? (
+        <Card>
+          <EmptyState message="No active orders. Place room service from the Counter — delivered tickets leave this queue." />
+          <div className="flex justify-center pb-6">
+            <Link to="/counter">
+              <Button icon={<UtensilsCrossed className="h-4 w-4" />}>Go to counter</Button>
+            </Link>
+          </div>
+        </Card>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {active.map((row) => {
+            const mins = waitMinutes(row.createdAt);
+            const tone = waitTone(mins);
+            return (
+              <article
+                key={row.id}
+                className={cn(
+                  "flex flex-col rounded-2xl border bg-[var(--surface)] p-4 shadow-sm transition",
+                  tone === "danger"
+                    ? "border-red-300/80 ring-1 ring-red-200/60 dark:border-red-900"
+                    : tone === "warning"
+                      ? "border-orange-300/80 ring-1 ring-orange-200/50 dark:border-orange-900"
+                      : "border-app",
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-3xl font-extrabold tracking-tight">
+                      {row.roomNumber}
+                    </p>
+                    <p className="mt-0.5 text-sm font-semibold text-muted">{row.guestName}</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <Badge tone="gold">{row.token}</Badge>
+                    <Badge tone={tone}>
+                      <Clock3 className="me-1 h-3 w-3" />
+                      {formatWaitLabel(mins)}
+                    </Badge>
+                    <Badge tone={row.paymentStatus === "paid" ? "success" : "warning"}>
+                      {row.paymentStatus === "paid" ? "Paid" : "Due"}
+                    </Badge>
+                  </div>
+                </div>
 
-      <Card>
-        {filtered.length === 0 ? (
-          <EmptyState message="No orders yet. Create one for an in-house room." />
-        ) : (
-          <Table
-            headers={[
-              "Token",
-              "Room / guest",
-              t.items,
-              t.common.amount,
-              t.status,
-              "Placed",
-              t.common.actions,
-            ]}
-          >
-            {filtered.map((row) => (
-              <Tr key={row.id}>
-                <Td className="font-bold">{row.token}</Td>
-                <Td>
-                  <div className="font-semibold">Room {row.roomNumber}</div>
-                  <div className="text-xs text-muted">{row.guestName}</div>
-                </Td>
-                <Td className="max-w-xs text-sm">
-                  {row.items
-                    .map(
-                      (i) =>
-                        `${i.qty}× ${language === "ur" && i.nameUr ? i.nameUr : i.name}`,
-                    )
-                    .join(", ")}
-                </Td>
-                <Td className="font-semibold">{formatRs(row.amount, t.common.rs)}</Td>
-                <Td>
-                  <Badge tone={row.status === "pending" ? "warning" : "success"}>
-                    {row.status === "pending" ? "Pending" : "Delivered"}
-                  </Badge>
-                </Td>
-                <Td className="text-muted text-sm">{formatWhen(row.createdAt)}</Td>
-                <Td>
-                  <div className="flex flex-wrap gap-1.5">
-                    <Button
-                      size="sm"
-                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
-                      icon={<Eye className="h-3.5 w-3.5" />}
-                      onClick={() => setViewRow(row)}
+                <ul className="mt-4 flex-1 space-y-1.5 border-y border-app py-3">
+                  {row.items.map((item, idx) => (
+                    <li
+                      key={`${item.menuItemId}-${idx}`}
+                      className="flex items-baseline justify-between gap-2 text-sm"
                     >
-                      View
-                    </Button>
+                      <span className="min-w-0">
+                        <span className="font-extrabold text-[var(--accent)]">{item.qty}×</span>{" "}
+                        <span className="font-medium">
+                          {language === "ur" && item.nameUr ? item.nameUr : item.name}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-muted">
+                        {formatRs(item.lineTotal, t.common.rs)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                {row.notes ? (
+                  <p className="mt-3 rounded-xl bg-app px-3 py-2 text-xs text-muted">
+                    <span className="font-bold text-app">Note · </span>
+                    {row.notes}
+                  </p>
+                ) : null}
+
+                <div className="mt-4 flex items-center justify-between gap-2">
+                  <p className="text-lg font-extrabold">{formatRs(row.amount, t.common.rs)}</p>
+                  <p className="text-[11px] text-muted">{formatWhen(row.createdAt)}</p>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <Button
+                    size="sm"
+                    className="flex-1 cursor-pointer justify-center"
+                    icon={<Check className="h-3.5 w-3.5" />}
+                    disabled={actingId === row.id}
+                    onClick={() => void onDeliver(row)}
+                  >
+                    {actingId === row.id ? "…" : "Mark delivered"}
+                  </Button>
+                  {row.paymentStatus === "due" ? (
                     <Button
                       size="sm"
                       variant="gold"
                       className="cursor-pointer"
-                      icon={<Pencil className="h-3.5 w-3.5" />}
-                      onClick={() => openEdit(row)}
+                      disabled={actingId === row.id}
+                      onClick={() => void onMarkPaid(row)}
                     >
-                      Edit
+                      Mark paid
                     </Button>
-                    {row.status === "pending" ? (
-                      <Button
-                        size="sm"
-                        className="cursor-pointer"
-                        icon={<Check className="h-3.5 w-3.5" />}
-                        disabled={actingId === row.id}
-                        onClick={() => onDeliver(row)}
-                      >
-                        Delivered
-                      </Button>
-                    ) : null}
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      className="cursor-pointer"
-                      icon={<Trash2 className="h-3.5 w-3.5" />}
-                      onClick={() => setDeleteRow(row)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </Td>
-              </Tr>
-            ))}
-          </Table>
-        )}
-      </Card>
-
-      <Modal
-        open={formOpen}
-        onClose={() => !saving && setFormOpen(false)}
-        title={editingId ? "Edit order" : "New room order"}
-        subtitle="Select room by active check-in — guest name is filled from that stay."
-        wide
-        footer={
-          <>
-            <Button variant="secondary" disabled={saving} onClick={() => setFormOpen(false)}>
-              {t.common.cancel}
-            </Button>
-            <Button disabled={saving} onClick={onSave}>
-              {saving ? "Saving…" : editingId ? "Save changes" : "Place order"}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          {formError ? (
-            <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-              {formError}
-            </p>
-          ) : null}
-
-          {!editingId ? (
-            <SelectField label="Room (in-house)">
-              <FancySelect
-                value={form.checkInId}
-                onChange={(checkInId) => setForm((p) => ({ ...p, checkInId }))}
-                placeholder={
-                  roomOptions.length ? "Select room / guest" : "No guests checked in"
-                }
-                options={roomOptions}
-                disabled={!roomOptions.length}
-              />
-            </SelectField>
-          ) : (
-            <div className="rounded-xl bg-app px-3 py-2 text-sm">
-              <span className="text-muted">Room </span>
-              <span className="font-bold">
-                {orders.find((o) => o.id === editingId)?.roomNumber}
-              </span>
-              <span className="text-muted"> · </span>
-              <span className="font-semibold">
-                {orders.find((o) => o.id === editingId)?.guestName}
-              </span>
-            </div>
-          )}
-
-          {selectedStay && !editingId ? (
-            <p className="text-xs text-muted">
-              Billing to <strong>{selectedStay.guestName}</strong> — food adds to stay extras (
-              current extras {formatRs(selectedStay.extraCharges || 0, t.common.rs)}).
-            </p>
-          ) : null}
-
-          <div className="grid gap-2 sm:grid-cols-[1fr_6.5rem_auto]">
-            <SelectField label="Add dish">
-              <FancySelect
-                value={menuPick}
-                onChange={setMenuPick}
-                placeholder="Choose from menu"
-                options={menuOptions}
-              />
-            </SelectField>
-            <Field label="Quantity">
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={qtyPick}
-                onChange={(e) => setQtyPick(e.target.value)}
-              />
-            </Field>
-            <div className="flex items-end">
-              <Button type="button" variant="secondary" disabled={!menuPick} onClick={addLine}>
-                Add
-              </Button>
-            </div>
-          </div>
-
-          {form.lines.length ? (
-            <ul className="space-y-2">
-              {form.lines.map((line) => (
-                <li
-                  key={line.menuItemId}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-app px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="font-semibold">
-                      {language === "ur" && line.nameUr ? line.nameUr : line.name}
-                    </p>
-                    <p className="text-xs text-muted">
-                      {formatRs(line.unitPrice, t.common.rs)} each
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Field label="Qty" className="w-20">
-                      <Input
-                        type="number"
-                        min={1}
-                        step={1}
-                        value={line.qty}
-                        onChange={(e) =>
-                          setQty(line.menuItemId, Number(e.target.value) || 0)
-                        }
-                      />
-                    </Field>
-                    <span className="w-24 self-end pb-2 text-end text-sm font-bold">
-                      {formatRs(line.qty * line.unitPrice, t.common.rs)}
-                    </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="self-end mb-0.5"
-                      onClick={() => setQty(line.menuItemId, 0)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="rounded-xl border border-dashed border-app px-3 py-6 text-center text-sm text-muted">
-              No dishes yet — pick from the menu above.
-            </p>
-          )}
-
-          <div className="rounded-2xl border border-app bg-accent-soft px-4 py-3">
-            <p className="text-xs font-bold uppercase tracking-wide text-[var(--accent)]">
-              Order total (goes on guest bill)
-            </p>
-            <p className="mt-1 text-xl font-extrabold text-[var(--accent)]">
-              {formatRs(formTotal, t.common.rs)}
-            </p>
-          </div>
-
-          <Field label="Notes (optional)">
-            <TextArea
-              value={form.notes}
-              onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
-              placeholder="No onions, deliver to room…"
-              rows={2}
-            />
-          </Field>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
+                    icon={<Eye className="h-3.5 w-3.5" />}
+                    onClick={() => setViewRow(row)}
+                  >
+                    View
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    className="cursor-pointer"
+                    icon={<Trash2 className="h-3.5 w-3.5" />}
+                    onClick={() => setDeleteRow(row)}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </article>
+            );
+          })}
         </div>
-      </Modal>
+      )}
 
       <Modal
         open={Boolean(viewRow)}
         onClose={() => setViewRow(null)}
         title={viewRow ? viewRow.token : "Order"}
         subtitle={
-          viewRow
-            ? `Room ${viewRow.roomNumber} · ${viewRow.guestName}`
-            : undefined
+          viewRow ? `Room ${viewRow.roomNumber} · ${viewRow.guestName}` : undefined
         }
         footer={
-          <Button variant="secondary" onClick={() => setViewRow(null)}>
-            Close
-          </Button>
+          <>
+            <Button variant="secondary" onClick={() => setViewRow(null)}>
+              Close
+            </Button>
+            {viewRow?.paymentStatus === "due" ? (
+              <Button
+                variant="gold"
+                disabled={actingId === viewRow.id}
+                onClick={() => void onMarkPaid(viewRow)}
+              >
+                Mark paid
+              </Button>
+            ) : null}
+            {viewRow ? (
+              <Button
+                disabled={actingId === viewRow.id}
+                icon={<Check className="h-4 w-4" />}
+                onClick={() => void onDeliver(viewRow)}
+              >
+                Mark delivered
+              </Button>
+            ) : null}
+          </>
         }
       >
         {viewRow ? (
           <div className="space-y-4">
             <div className="grid gap-2 sm:grid-cols-2">
-              <Detail
-                label="Status"
-                value={viewRow.status === "pending" ? "Pending" : "Delivered"}
-              />
+              <Detail label="Wait time" value={formatWaitLabel(waitMinutes(viewRow.createdAt))} />
               <Detail label="Amount" value={formatRs(viewRow.amount, t.common.rs)} />
               <Detail label="Placed" value={formatWhen(viewRow.createdAt)} />
               <Detail
-                label="Delivered"
-                value={viewRow.deliveredAt ? formatWhen(viewRow.deliveredAt) : "—"}
+                label="Payment"
+                value={viewRow.paymentStatus === "paid" ? "Paid" : "Due on stay"}
               />
+              <Detail label="Delivery" value="Pending delivery" />
             </div>
             <ul className="space-y-1 text-sm">
               {viewRow.items.map((i, idx) => (
@@ -596,9 +351,7 @@ export function OrdersPage() {
                   <span>
                     {i.qty}× {language === "ur" && i.nameUr ? i.nameUr : i.name}
                   </span>
-                  <span className="font-semibold">
-                    {formatRs(i.lineTotal, t.common.rs)}
-                  </span>
+                  <span className="font-semibold">{formatRs(i.lineTotal, t.common.rs)}</span>
                 </li>
               ))}
             </ul>
@@ -606,8 +359,9 @@ export function OrdersPage() {
               <p className="rounded-xl bg-app px-3 py-2 text-sm text-muted">{viewRow.notes}</p>
             ) : null}
             <p className="text-xs text-muted">
-              This amount is included in the guest’s stay extras / total bill for check-in{" "}
-              <code className="text-[11px]">{viewRow.checkInId.slice(0, 8)}…</code>
+              {viewRow.paymentStatus === "paid"
+                ? "Already paid at counter — still listed on the stay for the folio."
+                : "Not paid yet — amount is on the guest stay balance until checkout or Mark paid."}
             </p>
           </div>
         ) : null}
@@ -628,8 +382,9 @@ export function OrdersPage() {
               Cancel
             </Button>
             <Button
+              variant="danger"
               disabled={actingId === deleteRow?.id}
-              onClick={onDeleteConfirm}
+              onClick={() => void onDeleteConfirm()}
             >
               Delete
             </Button>

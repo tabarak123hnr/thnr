@@ -6,15 +6,15 @@ type Size = "sm" | "md" | "lg";
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-[var(--text)] text-[var(--bg-elevated)] border border-transparent hover:opacity-90 hover:shadow-md hover:brightness-110",
+    "bg-[var(--text)] text-[var(--bg-elevated)] border border-transparent hover:brightness-125",
   secondary:
-    "bg-transparent text-[var(--text)] border border-[var(--border)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent)] hover:shadow-sm",
+    "bg-transparent text-[var(--text)] border border-[var(--border)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent)]",
   ghost:
-    "bg-transparent text-[var(--text-muted)] border border-transparent hover:text-[var(--text)] hover:bg-[var(--accent-soft)] hover:shadow-sm",
+    "bg-transparent text-[var(--text-muted)] border border-transparent hover:text-[var(--text)] hover:bg-[var(--accent-soft)]",
   danger:
-    "bg-[var(--danger)] text-white border border-transparent hover:opacity-90 hover:brightness-110 hover:shadow-md",
+    "bg-[var(--danger)] text-white border border-transparent hover:brightness-110",
   gold:
-    "bg-accent text-[var(--accent-text)] border border-transparent font-semibold hover:opacity-95 hover:brightness-105 hover:shadow-md",
+    "bg-accent text-[var(--accent-text)] border border-transparent font-semibold hover:brightness-110",
 };
 
 const sizes: Record<Size, string> = {
@@ -41,11 +41,9 @@ export function Button({
     <button
       className={cn(
         "inline-flex cursor-pointer items-center justify-center gap-2 font-semibold",
-        "transition-all duration-200 ease-out",
-        "hover:-translate-y-0.5 hover:scale-[1.02]",
-        "active:translate-y-0 active:scale-[0.98]",
+        "transition-[filter,background-color,border-color,color,opacity] duration-150 ease-out",
         "disabled:cursor-not-allowed disabled:opacity-50 disabled:pointer-events-none",
-        "disabled:hover:translate-y-0 disabled:hover:scale-100 disabled:hover:shadow-none",
+        "disabled:hover:brightness-100",
         variants[variant],
         sizes[size],
         className,

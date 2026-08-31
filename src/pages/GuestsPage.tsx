@@ -182,7 +182,7 @@ export function GuestsPage() {
                   <Td>
                     <Button
                       size="sm"
-                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500 hover:!shadow-md"
+                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
                       icon={<Eye className="h-3.5 w-3.5" />}
                       onClick={() => setViewRow(row)}
                     >
@@ -228,6 +228,12 @@ export function GuestsPage() {
                 value={`${viewRow.adults} adults · ${viewRow.children} children`}
               />
               <Detail label="Purpose" value={viewRow.purpose || "—"} />
+              <Detail label="Checked in by" value={viewRow.checkedInBy || "—"} />
+              <Detail label="Vehicle color" value={viewRow.vehicleColor || "—"} />
+              <Detail label="Vehicle number" value={viewRow.vehicleNumber || "—"} />
+              {viewRow.status === "checked_out" ? (
+                <Detail label="Checked out by" value={viewRow.checkedOutBy || "—"} />
+              ) : null}
               <Detail label="Nights" value={String(viewBill.nights)} />
               <Detail label={t.common.rate} value={formatRs(viewBill.nightlyRate, t.common.rs)} />
               <Detail label="Payment" value={paymentBadge(viewRow).label} />

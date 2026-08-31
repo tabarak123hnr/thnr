@@ -35,6 +35,10 @@ export interface BookingRequest {
   nights: number;
   totalBill: number;
   channel: BookingChannel;
+  /** Staff or agent who took the booking */
+  bookedBy: string;
+  /** External / agent reference code */
+  reference: string;
   notes: string;
   status: BookingRequestStatus;
   createdAt?: unknown;
