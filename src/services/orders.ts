@@ -10,6 +10,7 @@ import {
   query,
   serverTimestamp,
   updateDoc,
+  where,
   type Unsubscribe,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
