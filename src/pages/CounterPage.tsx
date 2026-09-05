@@ -171,8 +171,12 @@ export function CounterPage() {
         title={t.pages.counterTitle}
         subtitle={t.pages.counterSub}
         actions={
-          <Link to="/orders">
-            <Button variant="secondary" icon={<ClipboardList className="h-4 w-4" />}>
+          <Link to="/orders" className="w-full sm:w-auto">
+            <Button
+              variant="secondary"
+              className="w-full sm:w-auto"
+              icon={<ClipboardList className="h-4 w-4" />}
+            >
               Kitchen queue
               {pendingCount > 0 ? (
                 <span className="ms-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--warning)] px-1.5 text-[11px] font-bold text-white">
@@ -202,8 +206,8 @@ export function CounterPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.35fr_0.85fr]">
-        <Card className="min-w-0">
+      <div className="grid gap-4 lg:grid-cols-[1.35fr_0.85fr]">
+        <Card className="order-2 min-w-0 lg:order-1">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <UtensilsCrossed className="h-5 w-5 text-[var(--accent)]" />
@@ -295,7 +299,7 @@ export function CounterPage() {
           )}
         </Card>
 
-        <Card className="h-fit lg:sticky lg:top-20">
+        <Card className="order-1 h-fit sticky top-[4.25rem] z-10 lg:order-2 lg:top-20">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <ShoppingBag className="h-5 w-5 text-[var(--accent)]" />
@@ -355,9 +359,9 @@ export function CounterPage() {
               cart.map((line) => (
                 <div
                   key={line.menuItemId}
-                  className="flex items-center gap-2 rounded-xl border border-app bg-app px-3 py-2.5"
+                  className="flex flex-wrap items-center gap-2 rounded-xl border border-app bg-app px-3 py-2.5 sm:flex-nowrap"
                 >
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 basis-[40%]">
                     <p className="truncate text-sm font-semibold">
                       {language === "ur" && line.nameUr ? line.nameUr : line.name}
                     </p>
@@ -384,7 +388,7 @@ export function CounterPage() {
                       <Plus className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  <span className="w-20 text-end text-sm font-bold">
+                  <span className="ms-auto min-w-[4.5rem] text-end text-sm font-bold tabular-nums">
                     {formatRs(line.qty * line.unitPrice, t.common.rs)}
                   </span>
                 </div>

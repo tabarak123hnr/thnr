@@ -389,7 +389,7 @@ export function RoomsPage() {
         subtitle="Create rooms, upload photos, and track booking & cleaning status."
         actions={
           <>
-            <div className="w-40 shrink-0">
+            <div className="min-w-[9rem] flex-1 sm:w-40 sm:flex-none">
               <FancySelect
                 value={filter}
                 onChange={(v) => setFilter(v as typeof filter)}
@@ -402,7 +402,7 @@ export function RoomsPage() {
                 ]}
               />
             </div>
-            <div className="w-44 shrink-0">
+            <div className="min-w-[9rem] flex-1 sm:w-44 sm:flex-none">
               <FancySelect
                 value={cleaningFilter}
                 onChange={(v) => setCleaningFilter(v as typeof cleaningFilter)}
@@ -416,7 +416,7 @@ export function RoomsPage() {
             </div>
             <Button
               type="button"
-              className="shrink-0 cursor-pointer"
+              className="w-full shrink-0 cursor-pointer sm:w-auto"
               icon={<Plus className="h-4 w-4" />}
               onClick={openAdd}
             >

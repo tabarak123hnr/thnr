@@ -95,7 +95,7 @@ export function GuestsPage() {
         title={t.pages.guestsTitle}
         subtitle={t.pages.guestsSub}
         actions={
-          <div className="w-40 shrink-0">
+          <div className="w-full sm:w-40 sm:shrink-0">
             <FancySelect
               value={filter}
               onChange={(v) => setFilter(v as typeof filter)}

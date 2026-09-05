@@ -346,16 +346,17 @@ export function AccountsPage() {
           <>
             <Button
               variant="secondary"
+              className="w-full sm:w-auto"
               onClick={() => void onRefresh()}
               disabled={refreshing}
             >
               <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
               {a.refresh}
             </Button>
-            <Button variant="secondary" onClick={onExportExpenses}>
+            <Button variant="secondary" className="w-full sm:w-auto" onClick={onExportExpenses}>
               {t.common.export}
             </Button>
-            <Button variant="gold" onClick={openCreate}>
+            <Button variant="gold" className="w-full sm:w-auto" onClick={openCreate}>
               <Plus className="h-4 w-4" />
               {a.addExpense}
             </Button>

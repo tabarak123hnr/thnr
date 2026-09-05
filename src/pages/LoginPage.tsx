@@ -102,12 +102,12 @@ export function LoginPage() {
       />
 
       <div className="relative z-10 flex min-h-dvh flex-col lg:flex-row">
-        <aside className="flex flex-1 flex-col justify-between px-8 py-10 lg:px-14 lg:py-14">
+        <aside className="flex flex-1 flex-col justify-between px-5 py-8 sm:px-8 sm:py-10 lg:px-14 lg:py-14">
           <div className="flex items-center justify-between gap-3">
             <img
               src="/logo.jpg"
               alt={t.brand}
-              className="h-16 w-auto max-w-[min(100%,320px)] object-contain object-left drop-shadow-md sm:h-20"
+              className="h-14 w-auto max-w-[min(100%,280px)] object-contain object-left drop-shadow-md sm:h-20 sm:max-w-[min(100%,320px)]"
             />
             <button
               type="button"
@@ -118,14 +118,14 @@ export function LoginPage() {
             </button>
           </div>
 
-          <div className="my-12 max-w-md lg:my-0">
+          <div className="my-8 max-w-md sm:my-12 lg:my-0">
             <p className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
               {t.login.eyebrow}
             </p>
-            <h1 className="text-4xl font-extrabold leading-[1.1] tracking-tight drop-shadow-sm sm:text-5xl">
+            <h1 className="text-3xl font-extrabold leading-[1.1] tracking-tight drop-shadow-sm sm:text-5xl">
               {t.login.heroTitle}
             </h1>
-            <p className="mt-4 text-base leading-relaxed text-muted">{t.login.heroSub}</p>
+            <p className="mt-4 text-sm leading-relaxed text-muted sm:text-base">{t.login.heroSub}</p>
             <div className="mt-8 flex flex-wrap gap-3">
               {[t.login.pill1, t.login.pill2, t.login.pill3].map((pill) => (
                 <span

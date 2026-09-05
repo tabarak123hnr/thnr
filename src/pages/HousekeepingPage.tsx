@@ -415,7 +415,7 @@ export function HousekeepingPage() {
         subtitle="Assign with a dirty-room photo, then Mark done (optional clean photo) when finished."
         actions={
           <>
-            <div className="w-44 shrink-0">
+            <div className="min-w-[9rem] flex-1 sm:w-44 sm:flex-none">
               <FancySelect
                 value={statusFilter}
                 onChange={(v) => setStatusFilter(v as typeof statusFilter)}
@@ -430,7 +430,7 @@ export function HousekeepingPage() {
             </div>
             <Button
               type="button"
-              className="shrink-0 cursor-pointer"
+              className="w-full shrink-0 cursor-pointer sm:w-auto"
               icon={<Plus className="h-4 w-4" />}
               onClick={openCreate}
             >
@@ -455,7 +455,7 @@ export function HousekeepingPage() {
               After checkout a room turns dirty here until housekeeping finishes.
             </p>
           </div>
-          <div className="w-48 shrink-0">
+          <div className="w-full sm:w-48 sm:shrink-0">
             <FancySelect
               value={roomCleanFilter}
               onChange={(v) => setRoomCleanFilter(v as typeof roomCleanFilter)}

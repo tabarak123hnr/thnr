@@ -207,7 +207,7 @@ export function InvoicesPage() {
           <>
             <Button
               variant="secondary"
-              className="cursor-pointer"
+              className="w-full cursor-pointer sm:w-auto"
               icon={
                 <RefreshCw
                   className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
@@ -220,7 +220,7 @@ export function InvoicesPage() {
             </Button>
             <Button
               variant="secondary"
-              className="cursor-pointer"
+              className="w-full cursor-pointer sm:w-auto"
               icon={<Download className="h-4 w-4" />}
               onClick={onExportList}
             >

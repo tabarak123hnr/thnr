@@ -348,7 +348,7 @@ export function BookingRequestsPage() {
         subtitle="Requests by date — rooms show if free for the stay, even if occupied now."
         actions={
           <>
-            <div className="w-40 shrink-0">
+            <div className="min-w-[9rem] flex-1 sm:w-40 sm:flex-none">
               <FancySelect
                 value={filter}
                 onChange={(v) => setFilter(v as typeof filter)}
@@ -362,7 +362,7 @@ export function BookingRequestsPage() {
             </div>
             <Button
               type="button"
-              className="shrink-0 cursor-pointer"
+              className="w-full shrink-0 cursor-pointer sm:w-auto"
               icon={<Plus className="h-4 w-4" />}
               onClick={openCreate}
             >

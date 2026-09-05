@@ -260,7 +260,7 @@ export function EmployeesPage() {
         subtitle="Staff roster with designation and CNIC — used for housekeeping and other tasks."
         actions={
           <>
-            <div className="w-36 shrink-0">
+            <div className="min-w-[9rem] flex-1 sm:w-36 sm:flex-none">
               <FancySelect
                 value={statusFilter}
                 onChange={(v) => setStatusFilter(v as typeof statusFilter)}
@@ -274,7 +274,7 @@ export function EmployeesPage() {
             </div>
             <Button
               type="button"
-              className="shrink-0 cursor-pointer"
+              className="w-full shrink-0 cursor-pointer sm:w-auto"
               icon={<Plus className="h-4 w-4" />}
               onClick={openCreate}
             >

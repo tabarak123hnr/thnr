@@ -323,7 +323,7 @@ export function MenuPage() {
           <>
             <Button
               variant="secondary"
-              className="cursor-pointer"
+              className="w-full cursor-pointer sm:w-auto"
               icon={<Upload className="h-4 w-4" />}
               onClick={() => {
                 setImportError(null);
@@ -336,13 +336,17 @@ export function MenuPage() {
             </Button>
             <Button
               variant="secondary"
-              className="cursor-pointer"
+              className="w-full cursor-pointer sm:w-auto"
               icon={<Download className="h-4 w-4" />}
               onClick={() => setExportOpen(true)}
             >
               {t.common.export}
             </Button>
-            <Button className="cursor-pointer" icon={<Plus className="h-4 w-4" />} onClick={openCreate}>
+            <Button
+              className="w-full cursor-pointer sm:w-auto"
+              icon={<Plus className="h-4 w-4" />}
+              onClick={openCreate}
+            >
               {t.common.add} item
             </Button>
           </>

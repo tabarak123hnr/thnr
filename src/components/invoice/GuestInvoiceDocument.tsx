@@ -133,8 +133,8 @@ export const GuestInvoiceDocument = forwardRef<
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 32,
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: 24,
             marginBottom: 20,
           }}
         >
@@ -301,7 +301,7 @@ export const GuestInvoiceDocument = forwardRef<
             paddingTop: 16,
             borderTop: `1px solid ${LINE}`,
             display: "grid",
-            gridTemplateColumns: "1fr 1fr",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
             gap: 24,
           }}
         >
@@ -314,12 +314,7 @@ export const GuestInvoiceDocument = forwardRef<
               {invoice.notes && !isFood ? ` Notes: ${invoice.notes}` : ""}
             </p>
           </div>
-          <div
-            style={{
-              borderLeft: `1px solid ${LINE}`,
-              paddingLeft: 24,
-            }}
-          >
+          <div>
             <p style={footerTitle}>Payment information</p>
             <p style={footerBody}>
               Please settle any balance due before or at check-out.

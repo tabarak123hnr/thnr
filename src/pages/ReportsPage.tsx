@@ -519,6 +519,7 @@ export function ReportsPage() {
             <>
               <Button
                 variant="secondary"
+                className="w-full sm:w-auto"
                 onClick={onDownloadCsv}
                 disabled={Boolean(downloading)}
               >
@@ -527,13 +528,19 @@ export function ReportsPage() {
               </Button>
               <Button
                 variant="secondary"
+                className="w-full sm:w-auto"
                 onClick={() => void onDownloadPdf()}
                 disabled={Boolean(downloading)}
               >
                 <Download className="h-4 w-4" />
                 {downloading === "pdf" ? "Saving…" : "Download PDF"}
               </Button>
-              <Button variant="secondary" onClick={onPrint} disabled={Boolean(downloading)}>
+              <Button
+                variant="secondary"
+                className="w-full sm:w-auto"
+                onClick={onPrint}
+                disabled={Boolean(downloading)}
+              >
                 <Printer className="h-4 w-4" />
                 Print
               </Button>
@@ -542,7 +549,7 @@ export function ReportsPage() {
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(260px,320px)_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(240px,300px)_1fr]">
         {/* Search & guest list */}
         <Card className="h-fit lg:sticky lg:top-4">
           <CardHeader title="Find guest" />
@@ -569,7 +576,7 @@ export function ReportsPage() {
             {filtered.length} guest{filtered.length === 1 ? "" : "s"}
             {query ? " match" : ""}
           </p>
-          <ul className="max-h-[min(60vh,520px)] space-y-1 overflow-y-auto">
+          <ul className="max-h-[min(40vh,320px)] space-y-1 overflow-y-auto lg:max-h-[min(60vh,520px)]">
             {filtered.length === 0 ? (
               <li>
                 <EmptyState message="No guests match this search." />

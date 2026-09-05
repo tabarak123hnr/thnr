@@ -138,7 +138,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <aside
-      className="relative flex h-full w-[280px] flex-col overflow-hidden text-white"
+      className="relative flex h-full w-[min(100vw,280px)] flex-col overflow-hidden text-white"
       style={{
         background: `linear-gradient(180deg, #07101f 0%, ${NAVY} 55%, #03060f 100%)`,
       }}
