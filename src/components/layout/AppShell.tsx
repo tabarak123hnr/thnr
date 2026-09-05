@@ -30,8 +30,8 @@ export function AppShell() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Header onMenu={() => setMobileOpen(true)} />
-        <main className="flex-1 overflow-y-auto px-4 py-5 lg:px-6 lg:py-6">
-          <div className="mx-auto max-w-[1400px]">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5 lg:px-6 lg:py-6">
+          <div className="mx-auto w-full max-w-[1400px]">
             <Outlet />
           </div>
         </main>

@@ -263,6 +263,32 @@ export async function markOrderPayment(
   }
 }
 
+/**
+ * At checkout the stay bill is settled in full — flip any due kitchen tickets
+ * to paid without touching stay totals (already set to paid / balance 0).
+ */
+export async function markStayFoodOrdersPaid(checkInId: string) {
+  if (!auth.currentUser) throw new Error("You must be signed in.");
+  if (!checkInId) return 0;
+
+  const q = query(collection(db, "orders"), where("checkInId", "==", checkInId));
+  const snap = await getDocs(q);
+  let updated = 0;
+  await Promise.all(
+    snap.docs.map(async (d) => {
+      const data = d.data() as Record<string, unknown>;
+      const status = String(data.paymentStatus ?? "due");
+      if (status === "paid") return;
+      await updateDoc(doc(db, "orders", d.id), {
+        paymentStatus: "paid" satisfies FoodOrderPaymentStatus,
+        updatedAt: serverTimestamp(),
+      });
+      updated += 1;
+    }),
+  );
+  return updated;
+}
+
 export async function markOrderDelivered(id: string) {
   if (!auth.currentUser) {
     throw new Error("You must be signed in.");

@@ -12,8 +12,8 @@ export function Table({
   colWidths?: string[];
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] table-fixed border-collapse text-sm">
+    <div className="-mx-1 overflow-x-auto overscroll-x-contain px-1 touch-pan-x">
+      <table className="w-full min-w-[520px] table-fixed border-collapse text-sm sm:min-w-[600px] lg:min-w-[680px]">
         {colWidths?.length ? (
           <colgroup>
             {colWidths.map((w, i) => (
@@ -27,7 +27,7 @@ export function Table({
               <th
                 key={`${h}-${i}`}
                 scope="col"
-                className="px-3 py-3 text-left font-semibold align-middle"
+                className="whitespace-nowrap px-2 py-3 text-left font-semibold align-middle sm:px-3"
               >
                 {h}
               </th>
@@ -71,7 +71,7 @@ export function Td({
   return (
     <td
       colSpan={colSpan}
-      className={cn("px-3 py-3.5 text-left align-middle", className)}
+      className={cn("px-2 py-3 text-left align-middle sm:px-3 sm:py-3.5", className)}
     >
       {children}
     </td>

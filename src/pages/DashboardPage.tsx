@@ -249,11 +249,13 @@ export function DashboardPage() {
         subtitle={t.todaySub}
         actions={
           <>
-            <Link to="/check-in" className="md:hidden">
-              <Button>{t.newCheckIn}</Button>
+            <Link to="/check-in" className="w-full md:hidden sm:w-auto">
+              <Button className="w-full sm:w-auto">{t.newCheckIn}</Button>
             </Link>
-            <Link to="/counter" className="md:hidden">
-              <Button variant="secondary">{t.newOrder}</Button>
+            <Link to="/counter" className="w-full md:hidden sm:w-auto">
+              <Button variant="secondary" className="w-full sm:w-auto">
+                {t.newOrder}
+              </Button>
             </Link>
           </>
         }

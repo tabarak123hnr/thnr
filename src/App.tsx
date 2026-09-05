@@ -10,7 +10,6 @@ import { CheckInPage } from "./pages/CheckInPage";
 import { CounterPage } from "./pages/CounterPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EmployeesPage } from "./pages/EmployeesPage";
-import { GuestAppPage } from "./pages/GuestAppPage";
 import { GuestsPage } from "./pages/GuestsPage";
 import { HousekeepingPage } from "./pages/HousekeepingPage";
 import { InvoicesPage } from "./pages/InvoicesPage";
@@ -19,6 +18,7 @@ import { MenuPage } from "./pages/MenuPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { OrdersPage } from "./pages/OrdersPage";
 import { QrCardsPage } from "./pages/QrCardsPage";
+import { ReportsPage } from "./pages/ReportsPage";
 import { RoomsPage } from "./pages/RoomsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UserManagementPage } from "./pages/UserManagementPage";
@@ -47,7 +47,7 @@ export default function App() {
                 <Route path="accounts" element={<AccountsPage />} />
                 <Route path="invoices" element={<InvoicesPage />} />
                 <Route path="employees" element={<EmployeesPage />} />
-                <Route path="guest-app" element={<GuestAppPage />} />
+                <Route path="reports" element={<ReportsPage />} />
                 <Route path="user-management" element={<UserManagementPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />

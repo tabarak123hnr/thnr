@@ -15,8 +15,10 @@ export function QrCardsPage() {
         subtitle={t.pages.qrSub}
         actions={
           <>
-            <Button variant="secondary">Print selected</Button>
-            <Button>Generate all</Button>
+            <Button variant="secondary" className="w-full sm:w-auto">
+              Print selected
+            </Button>
+            <Button className="w-full sm:w-auto">Generate all</Button>
           </>
         }
       />

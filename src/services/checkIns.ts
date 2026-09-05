@@ -510,16 +510,26 @@ export async function checkoutGuest(
     const amountPaidBeforeCheckout = Math.min(priorPaid, bill.totalBill);
     const balanceBeforeCollect = Math.max(0, bill.totalBill - amountPaidBeforeCheckout);
     const alreadySettled = balanceBeforeCollect <= 0;
-    const paymentReceived =
-      alreadySettled ||
-      (mode === "manual"
-        ? (options?.paymentReceived ?? true)
-        : (options?.paymentReceived ?? false));
 
-    const amountPaid = paymentReceived ? bill.totalBill : amountPaidBeforeCheckout;
-    const balanceDue = Math.max(0, bill.totalBill - amountPaid);
+    // Manual checkout: staff must confirm payment received when anything is still due.
+    // Automatic checkout never invents a payment — unpaid stays stay in-house.
+    const paymentReceived = alreadySettled
+      ? true
+      : mode === "manual"
+        ? Boolean(options?.paymentReceived)
+        : false;
+
+    if (!alreadySettled && !paymentReceived) {
+      const due = Math.round(balanceBeforeCollect);
+      throw new Error(
+        `Cannot check out — Rs ${due.toLocaleString("en-PK")} still due. Collect the remaining bill first.`,
+      );
+    }
+
+    const amountPaid = bill.totalBill;
+    const balanceDue = 0;
     const paymentStatus = paymentStatusOnCheckout(balanceDue, {
-      paymentReceived: alreadySettled ? true : paymentReceived,
+      paymentReceived: true,
     });
 
     const checkedOutBy =
@@ -586,6 +596,14 @@ export async function checkoutGuest(
       } catch {
         // Task create is best-effort
       }
+    }
+
+    // Settle kitchen tickets billed to this stay (no stay-total adjust — already paid in full)
+    try {
+      const { markStayFoodOrdersPaid } = await import("./orders");
+      await markStayFoodOrdersPaid(id);
+    } catch {
+      // Best-effort — stay is already settled
     }
 
     return {

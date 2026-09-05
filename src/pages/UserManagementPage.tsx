@@ -456,12 +456,16 @@ export function UserManagementPage() {
             <Button
               type="button"
               variant="secondary"
-              className="cursor-pointer hover:border-[var(--accent)]"
+              className="w-full cursor-pointer hover:border-[var(--accent)] sm:w-auto"
               onClick={openRoleModal}
             >
               {t.pages.addRole}
             </Button>
-            <Button type="button" className="cursor-pointer" onClick={openUserModal}>
+            <Button
+              type="button"
+              className="w-full cursor-pointer sm:w-auto"
+              onClick={openUserModal}
+            >
               {t.pages.addUser}
             </Button>
           </>

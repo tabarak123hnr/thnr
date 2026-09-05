@@ -55,25 +55,25 @@ export function Modal({
           xl && "max-w-4xl",
         )}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-app px-5 py-4">
-          <div>
-            <h2 className="text-lg font-extrabold tracking-tight">{title}</h2>
+        <div className="flex items-start justify-between gap-3 border-b border-app px-4 py-3 sm:px-5 sm:py-4">
+          <div className="min-w-0">
+            <h2 className="text-base font-extrabold tracking-tight sm:text-lg">{title}</h2>
             {subtitle ? <p className="mt-0.5 text-sm text-muted">{subtitle}</p> : null}
           </div>
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="!px-2 cursor-pointer"
+            className="!px-2 shrink-0 cursor-pointer"
             onClick={onClose}
             aria-label="Close"
           >
             <X className="h-4 w-4" />
           </Button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-3 sm:px-5 sm:py-4">{children}</div>
         {footer ? (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-app px-5 py-4">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-app px-4 py-3 sm:px-5 sm:py-4">
             {footer}
           </div>
         ) : null}

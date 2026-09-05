@@ -51,11 +51,17 @@ export function FancySelect({
     const menuHeight = Math.min(280, options.length * 44 + 16);
     const spaceBelow = window.innerHeight - rect.bottom;
     const openUp = spaceBelow < menuHeight && rect.top > spaceBelow;
-    setCoords({
-      top: openUp ? rect.top - menuHeight - 6 : rect.bottom + 6,
-      left: rect.left,
-      width: rect.width,
-    });
+    const pad = 8;
+    const width = Math.min(Math.max(rect.width, 200), window.innerWidth - pad * 2);
+    let left = rect.left;
+    if (left + width > window.innerWidth - pad) left = window.innerWidth - pad - width;
+    if (left < pad) left = pad;
+    let top = openUp ? rect.top - menuHeight - 6 : rect.bottom + 6;
+    if (top < pad) top = pad;
+    if (top + menuHeight > window.innerHeight - pad) {
+      top = Math.max(pad, window.innerHeight - pad - menuHeight);
+    }
+    setCoords({ top, left, width });
   }
 
   useLayoutEffect(() => {
@@ -135,7 +141,8 @@ export function FancySelect({
                 position: "fixed",
                 top: coords.top,
                 left: coords.left,
-                width: Math.max(coords.width, 200),
+                width: coords.width,
+                maxWidth: "calc(100vw - 16px)",
                 zIndex: 80,
               }}
               className="animate-[toast-in_0.18s_ease-out] overflow-hidden rounded-2xl border border-app bg-elevated p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.18)]"
