@@ -377,7 +377,7 @@ export function InvoicesPage() {
         }
       >
         {openInvoice ? (
-          <div className="max-h-[70vh] overflow-auto rounded-xl bg-[#e8e4dc] p-3 sm:p-5">
+          <div className="max-h-[70vh] overflow-auto rounded-xl bg-white p-3 sm:p-5">
             <GuestInvoiceDocument
               ref={sheetRef}
               invoice={openInvoice}

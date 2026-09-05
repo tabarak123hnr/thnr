@@ -253,7 +253,9 @@ export function RoomsPage() {
     setCheckoutPassword("");
     setCheckedOutBy(staffDisplayName);
     setCheckoutError(null);
-    setCheckoutPaymentPaid(true);
+    setCheckoutPaymentPaid(
+      resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid",
+    );
     setCheckoutOpen(true);
   }
 
@@ -272,6 +274,21 @@ export function RoomsPage() {
       setCheckoutError("Enter who is checking the guest out.");
       return;
     }
+    const balanceNow = Math.max(
+      0,
+      (checkoutPreview?.totalBill ?? activeCheckIn.totalBill) -
+        resolveAmountPaid(activeCheckIn),
+    );
+    const billSettled =
+      balanceNow <= 0 ||
+      activeCheckIn.paymentStatus === "paid" ||
+      checkoutPaymentPaid;
+    if (!billSettled) {
+      setCheckoutError(
+        `Cannot check out — ${formatRs(balanceNow, t.common.rs)} still due. Confirm “Remaining balance paid” after collecting payment.`,
+      );
+      return;
+    }
     setCheckoutBusy(true);
     setCheckoutError(null);
     try {
@@ -280,10 +297,7 @@ export function RoomsPage() {
         mode: "manual",
         at: new Date().toISOString(),
         checkedOutBy: checkedOutBy.trim(),
-        paymentReceived:
-          (activeCheckIn.balanceDue ?? 0) <= 0 ||
-          activeCheckIn.paymentStatus === "paid" ||
-          checkoutPaymentPaid,
+        paymentReceived: true,
       });
       setCheckoutOpen(false);
       setCheckoutPassword("");
@@ -820,7 +834,19 @@ export function RoomsPage() {
               type="submit"
               form="room-checkout-form"
               variant="danger"
-              disabled={checkoutBusy || !checkoutPassword || !checkedOutBy.trim()}
+              disabled={
+                checkoutBusy ||
+                !checkoutPassword ||
+                !checkedOutBy.trim() ||
+                (activeCheckIn != null &&
+                  (checkoutPreview
+                    ? Math.max(
+                        0,
+                        checkoutPreview.totalBill - resolveAmountPaid(activeCheckIn),
+                      )
+                    : resolveBalanceDue(activeCheckIn)) > 0 &&
+                  !checkoutPaymentPaid)
+              }
             >
               {checkoutBusy ? "Checking out…" : "Check out"}
             </Button>
@@ -899,12 +925,12 @@ export function RoomsPage() {
                   <span className="font-bold">
                     {resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
                       ? "Payment paid"
-                      : "Remaining balance paid"}
+                      : "Remaining balance paid (required)"}
                   </span>
                   <span className="mt-0.5 block text-xs text-muted">
                     {resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
                       ? "Bill already settled."
-                      : "Check if the guest paid the remaining balance now."}
+                      : "Guest cannot check out until the remaining bill is collected. Check this after payment."}
                   </span>
                 </span>
               </label>

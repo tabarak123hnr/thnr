@@ -120,21 +120,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     setLoading(true);
-    await setPersistence(auth, browserLocalPersistence);
-    const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-    const tokenResult = await cred.user.getIdTokenResult(true);
-    const nextClaims = claimsFromToken(tokenResult.claims as Record<string, unknown>);
-    const nextProfile = await loadProfile(cred.user.uid, cred.user, nextClaims);
-    setUser(cred.user);
-    setClaims(nextClaims);
-    setProfile(nextProfile);
-    setLoading(false);
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const tokenResult = await cred.user.getIdTokenResult(true);
+      const nextClaims = claimsFromToken(tokenResult.claims as Record<string, unknown>);
+      const nextProfile = await loadProfile(cred.user.uid, cred.user, nextClaims);
+      setUser(cred.user);
+      setClaims(nextClaims);
+      setProfile(nextProfile);
 
-    const role = nextClaims.role || nextProfile.roleName || null;
-    const admin = isAdminUser(nextClaims, nextProfile, role);
-    const perms = admin ? ALL_PERMISSIONS : ((nextProfile.permissions ?? []) as PermissionId[]);
-    const check = makePermissionChecker(perms, admin);
-    return firstAllowedPath(check) || "/";
+      const role = nextClaims.role || nextProfile.roleName || null;
+      const admin = isAdminUser(nextClaims, nextProfile, role);
+      const perms = admin
+        ? ALL_PERMISSIONS
+        : ((nextProfile.permissions ?? []) as PermissionId[]);
+      const check = makePermissionChecker(perms, admin);
+      return firstAllowedPath(check) || "/";
+    } finally {
+      // Always clear — wrong password used to leave loading=true and freeze Sign in
+      setLoading(false);
+    }
   }, []);
 
   const logout = useCallback(async () => {

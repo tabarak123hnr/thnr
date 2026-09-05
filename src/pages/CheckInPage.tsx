@@ -432,9 +432,6 @@ export function CheckInPage() {
     setCheckoutPaymentPaid(
       resolveBalanceDue(row) <= 0 || row.paymentStatus === "paid",
     );
-    if (resolveBalanceDue(row) > 0 && row.paymentStatus !== "paid") {
-      setCheckoutPaymentPaid(true);
-    }
     setCheckedOutBy(staffDisplayName);
     setPasswordModal(true);
   }
@@ -473,6 +470,29 @@ export function CheckInPage() {
   async function submitPasswordGate(e: React.FormEvent) {
     e.preventDefault();
     if (!pendingEdit || !secureAction) return;
+
+    if (secureAction === "checkout") {
+      if (!checkedOutBy.trim()) {
+        setPasswordError("Enter who is checking the guest out.");
+        return;
+      }
+      const balanceNow = Math.max(
+        0,
+        (checkoutPreview?.totalBill ?? pendingEdit.totalBill) -
+          resolveAmountPaid(pendingEdit),
+      );
+      const billSettled =
+        balanceNow <= 0 ||
+        pendingEdit.paymentStatus === "paid" ||
+        checkoutPaymentPaid;
+      if (!billSettled) {
+        setPasswordError(
+          `Cannot check out — ${formatRs(balanceNow, t.common.rs)} still due. Confirm “Remaining balance paid” after collecting payment.`,
+        );
+        return;
+      }
+    }
+
     setVerifyingPassword(true);
     setPasswordError(null);
     try {
@@ -513,11 +533,7 @@ export function CheckInPage() {
         return;
       }
 
-      // checkout
-      if (!checkedOutBy.trim()) {
-        setPasswordError("Enter who is checking the guest out.");
-        return;
-      }
+      // checkout — payment already validated above
       const nowIso = new Date().toISOString();
       setCheckingOutId(row.id);
       try {
@@ -525,10 +541,7 @@ export function CheckInPage() {
           mode: "manual",
           at: nowIso,
           checkedOutBy: checkedOutBy.trim(),
-          paymentReceived:
-            resolveBalanceDue(row) <= 0 ||
-            row.paymentStatus === "paid" ||
-            checkoutPaymentPaid,
+          paymentReceived: true,
         });
         setPasswordModal(false);
         setPendingEdit(null);
@@ -1123,7 +1136,19 @@ export function CheckInPage() {
               variant={
                 secureAction === "checkout" || secureAction === "cancel" ? "danger" : "gold"
               }
-              disabled={verifyingPassword || Boolean(checkingOutId)}
+              disabled={
+                verifyingPassword ||
+                Boolean(checkingOutId) ||
+                (secureAction === "checkout" &&
+                  pendingEdit != null &&
+                  (checkoutPreview
+                    ? Math.max(
+                        0,
+                        checkoutPreview.totalBill - resolveAmountPaid(pendingEdit),
+                      )
+                    : resolveBalanceDue(pendingEdit)) > 0 &&
+                  !checkoutPaymentPaid)
+              }
             >
               {verifyingPassword || checkingOutId
                 ? secureAction === "checkout"
@@ -1237,14 +1262,12 @@ export function CheckInPage() {
                   <span className="font-bold text-app">
                     {resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
                       ? "Payment paid"
-                      : "Remaining balance paid"}
+                      : "Remaining balance paid (required)"}
                   </span>
                   <span className="mt-0.5 block text-xs text-muted">
                     {resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
                       ? "Bill already settled — stays marked paid."
-                      : checkoutPaymentPaid
-                        ? "Collect the remaining balance now — list will show Paid."
-                        : "Leave unchecked if the remaining balance is still outstanding (Due)."}
+                      : "Guest cannot check out until the remaining bill is collected. Check this after payment."}
                   </span>
                 </span>
               </label>

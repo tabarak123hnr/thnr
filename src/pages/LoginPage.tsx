@@ -1,4 +1,4 @@
-import { BedDouble, Eye, EyeOff, Lock, Mail, Moon, Sun } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/Button";
@@ -24,7 +24,7 @@ function mapAuthError(code: string) {
 }
 
 export function LoginPage() {
-  const { t, theme, toggleTheme, language, setLanguage } = useApp();
+  const { t, language, setLanguage } = useApp();
   const { user, loading, login, defaultPath, hasPermission, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -76,69 +76,61 @@ export function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-app text-app">
+    <div className="dark relative min-h-dvh overflow-hidden text-app">
+      {/* Building photo */}
+      <div
+        className="pointer-events-none absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url("/building-image.png")' }}
+        aria-hidden
+      />
+      {/* Dark wash — login always uses dark look */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            theme === "dark"
-              ? "radial-gradient(ellipse 80% 60% at 10% 20%, rgba(232,197,71,0.14), transparent 55%), radial-gradient(ellipse 70% 50% at 90% 80%, rgba(232,197,71,0.08), transparent 50%), linear-gradient(160deg, #0c0c0c 0%, #161616 100%)"
-              : "radial-gradient(ellipse 80% 60% at 8% 15%, rgba(212,175,55,0.22), transparent 55%), radial-gradient(ellipse 60% 45% at 95% 85%, rgba(212,175,55,0.12), transparent 50%), linear-gradient(165deg, #f7f7f8 0%, #efefef 45%, #faf6ea 100%)",
+            "linear-gradient(115deg, rgba(8,8,8,0.82) 0%, rgba(12,12,12,0.62) 42%, rgba(10,10,10,0.72) 100%)",
         }}
+        aria-hidden
       />
       <div
-        className="pointer-events-none absolute inset-0 opacity-[0.35]"
+        className="pointer-events-none absolute inset-0"
         style={{
-          backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d4af37' fill-opacity='0.07'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
+          background:
+            "radial-gradient(ellipse 70% 50% at 15% 20%, rgba(232,197,71,0.12), transparent 55%), radial-gradient(ellipse 50% 40% at 90% 85%, rgba(232,197,71,0.08), transparent 50%)",
         }}
+        aria-hidden
       />
 
       <div className="relative z-10 flex min-h-dvh flex-col lg:flex-row">
         <aside className="flex flex-1 flex-col justify-between px-8 py-10 lg:px-14 lg:py-14">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent text-[var(--accent-text)] shadow-lg shadow-[color-mix(in_oklab,var(--accent)_35%,transparent)]">
-                <BedDouble className="h-6 w-6" strokeWidth={2.25} />
-              </div>
-              <div>
-                <p className="text-lg font-extrabold tracking-tight">{t.brand}</p>
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted">
-                  {t.brandSub}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setLanguage(language === "en" ? "ur" : "en")}
-                className="h-9 cursor-pointer rounded-xl border border-app bg-elevated/70 px-3 text-xs font-bold backdrop-blur hover:border-[var(--accent)]"
-              >
-                {language === "en" ? "اردو" : "EN"}
-              </button>
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className="cursor-pointer rounded-xl border border-app bg-elevated/70 p-2 backdrop-blur hover:border-[var(--accent)]"
-              >
-                {theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-              </button>
-            </div>
+            <img
+              src="/logo.jpg"
+              alt={t.brand}
+              className="h-16 w-auto max-w-[min(100%,320px)] object-contain object-left drop-shadow-md sm:h-20"
+            />
+            <button
+              type="button"
+              onClick={() => setLanguage(language === "en" ? "ur" : "en")}
+              className="h-9 shrink-0 cursor-pointer rounded-xl border border-app bg-[color-mix(in_oklab,var(--bg-elevated)_78%,transparent)] px-3 text-xs font-bold backdrop-blur-md hover:border-[var(--accent)]"
+            >
+              {language === "en" ? "اردو" : "EN"}
+            </button>
           </div>
 
           <div className="my-12 max-w-md lg:my-0">
             <p className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
               {t.login.eyebrow}
             </p>
-            <h1 className="text-4xl font-extrabold leading-[1.1] tracking-tight sm:text-5xl">
+            <h1 className="text-4xl font-extrabold leading-[1.1] tracking-tight drop-shadow-sm sm:text-5xl">
               {t.login.heroTitle}
             </h1>
-            <p className="mt-4 text-base text-muted leading-relaxed">{t.login.heroSub}</p>
+            <p className="mt-4 text-base leading-relaxed text-muted">{t.login.heroSub}</p>
             <div className="mt-8 flex flex-wrap gap-3">
               {[t.login.pill1, t.login.pill2, t.login.pill3].map((pill) => (
                 <span
                   key={pill}
-                  className="rounded-full border border-[color-mix(in_oklab,var(--accent)_40%,var(--border))] bg-accent-soft px-3 py-1.5 text-xs font-semibold text-[var(--text)]"
+                  className="rounded-full border border-[color-mix(in_oklab,var(--accent)_40%,var(--border))] bg-[color-mix(in_oklab,var(--accent-soft)_85%,transparent)] px-3 py-1.5 text-xs font-semibold text-[var(--text)] backdrop-blur-sm"
                 >
                   {pill}
                 </span>
@@ -151,14 +143,14 @@ export function LoginPage() {
 
         <main className="flex flex-1 items-center justify-center px-5 pb-10 lg:px-12 lg:py-14">
           <div className="w-full max-w-[420px]">
-            <div className="surface relative overflow-hidden rounded-3xl p-7 sm:p-8">
+            <div className="relative overflow-hidden rounded-3xl border border-app bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] p-7 shadow-[0_24px_64px_-24px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:p-8">
               <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-transparent via-[var(--accent)] to-transparent" />
               <h2 className="text-2xl font-extrabold tracking-tight">{t.login.title}</h2>
               <p className="mt-1 text-sm text-muted">{t.login.subtitle}</p>
 
               <form className="mt-7 space-y-4" onSubmit={onSubmit}>
                 {error ? (
-                  <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                  <div className="rounded-xl border border-red-900 bg-red-950/40 px-3 py-2.5 text-sm text-red-300">
                     {error}
                   </div>
                 ) : null}
@@ -207,7 +199,7 @@ export function LoginPage() {
                   type="submit"
                   size="lg"
                   className="mt-2 w-full cursor-pointer !h-12 text-sm"
-                  disabled={submitting || loading}
+                  disabled={submitting}
                 >
                   {submitting ? t.login.signingIn : t.login.signIn}
                 </Button>

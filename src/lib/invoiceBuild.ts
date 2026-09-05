@@ -54,6 +54,18 @@ function paymentFromSplit(
   return { amountPaid, balanceDue, paymentStatus };
 }
 
+/** Checkout completed with remaining balance collected → stay is fully settled. */
+export function isStaySettled(row: CheckInRecord) {
+  if (row.status !== "checked_out") return false;
+  return (
+    Math.max(0, Number(row.balanceDue) || 0) <= 0 || row.paymentStatus === "paid"
+  );
+}
+
+function stayOrdersFor(row: CheckInRecord, orders: FoodOrder[]) {
+  return orders.filter((o) => o.checkInId === row.id);
+}
+
 function guestBase(row: CheckInRecord) {
   return {
     checkInId: row.id,
@@ -74,9 +86,10 @@ function guestBase(row: CheckInRecord) {
   };
 }
 
-function buildFoodLines(orders: FoodOrder[]): InvoiceFoodLine[] {
+function buildFoodLines(orders: FoodOrder[], forcePaid: boolean): InvoiceFoodLine[] {
   const lines: InvoiceFoodLine[] = [];
   for (const order of orders) {
+    const linePaid = forcePaid || order.paymentStatus === "paid";
     for (const item of order.items) {
       lines.push({
         orderToken: order.token,
@@ -85,7 +98,7 @@ function buildFoodLines(orders: FoodOrder[]): InvoiceFoodLine[] {
         unitPrice: item.unitPrice,
         amount: item.lineTotal || item.qty * item.unitPrice,
         status: order.status,
-        paymentStatus: order.paymentStatus === "paid" ? "paid" : "due",
+        paymentStatus: linePaid ? "paid" : "due",
       });
     }
   }
@@ -98,18 +111,23 @@ export function buildRoomInvoice(
   orders: FoodOrder[] = [],
 ): GuestInvoice {
   const bill = resolveBill(row);
-  const stayOrders = orders.filter((o) => o.checkInId === row.id);
+  const stayOrders = stayOrdersFor(row, orders);
   const foodTotal = stayOrders.reduce((s, o) => s + (o.amount || 0), 0);
-  const foodPaid = stayOrders
-    .filter((o) => o.paymentStatus === "paid")
-    .reduce((s, o) => s + (o.amount || 0), 0);
+  const settled = isStaySettled(row);
+
+  const foodPaid = settled
+    ? foodTotal
+    : stayOrders
+        .filter((o) => o.paymentStatus === "paid")
+        .reduce((s, o) => s + (o.amount || 0), 0);
 
   const otherExtras = Math.max(0, (bill.extraCharges || 0) - foodTotal);
   const roomTotal = Math.max(0, bill.roomCharges + otherExtras);
 
   const stayPaid = Math.max(0, Number(row.amountPaid) || 0);
-  // Cash first covers paid food tickets; remainder applies to the room folio
-  const roomPaidRaw = Math.max(0, stayPaid - foodPaid);
+  // Settled checkout: room folio is paid in full.
+  // Otherwise cash first covers paid food tickets; remainder applies to room.
+  const roomPaidRaw = settled ? roomTotal : Math.max(0, stayPaid - foodPaid);
   const split = paymentFromSplit(roomTotal, roomPaidRaw);
 
   let paymentTiming: PaymentTiming = row.paymentTiming;
@@ -142,17 +160,20 @@ export function buildFoodInvoice(
   row: CheckInRecord,
   orders: FoodOrder[] = [],
 ): GuestInvoice | null {
-  const stayOrders = orders.filter((o) => o.checkInId === row.id);
+  const stayOrders = stayOrdersFor(row, orders);
   if (!stayOrders.length) return null;
 
   const bill = resolveBill(row);
-  const foodLines = buildFoodLines(stayOrders);
+  const settled = isStaySettled(row);
+  const foodLines = buildFoodLines(stayOrders, settled);
   const foodTotal = foodLines.reduce((s, l) => s + l.amount, 0);
   if (foodTotal <= 0) return null;
 
-  const foodPaid = stayOrders
-    .filter((o) => o.paymentStatus === "paid")
-    .reduce((s, o) => s + (o.amount || 0), 0);
+  const foodPaid = settled
+    ? foodTotal
+    : stayOrders
+        .filter((o) => o.paymentStatus === "paid")
+        .reduce((s, o) => s + (o.amount || 0), 0);
   const split = paymentFromSplit(foodTotal, foodPaid);
 
   let paymentTiming: PaymentTiming = "due_on_checkout";
@@ -182,6 +203,7 @@ export function buildFoodInvoice(
 /**
  * Builds separate room and food invoices (never a combined folio).
  * Food invoice is omitted when the stay has no restaurant orders.
+ * Settled checkouts treat room + food as paid (even if order flags lag).
  */
 export function buildGuestInvoices(
   checkIns: CheckInRecord[],
@@ -199,7 +221,6 @@ export function buildGuestInvoices(
     const tb = new Date(b.checkInAt).getTime();
     const byDate = (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
     if (byDate !== 0) return byDate;
-    // Room before food for same stay
     if (a.type !== b.type) return a.type === "room" ? -1 : 1;
     return a.number.localeCompare(b.number);
   });

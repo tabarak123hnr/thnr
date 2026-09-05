@@ -13,7 +13,7 @@ export const PERMISSIONS = [
   { id: "accounts", label: "Accounts", labelUr: "اکاؤنٹس" },
   { id: "invoices", label: "Invoices / Bills", labelUr: "انوائس / بلز" },
   { id: "employees", label: "Employees", labelUr: "ملازمین" },
-  { id: "guest_app", label: "Guest app", labelUr: "مہمان ایپ" },
+  { id: "reports", label: "Reports", labelUr: "رپورٹس" },
   { id: "user_management", label: "User management", labelUr: "یوزر مینجمنٹ" },
   { id: "settings", label: "Settings", labelUr: "ترتیبات" },
 ] as const;
@@ -23,8 +23,17 @@ export type PermissionId = (typeof PERMISSIONS)[number]["id"];
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, PermissionId[]> = {
   owner: PERMISSIONS.map((p) => p.id),
   admin: PERMISSIONS.filter((p) => p.id !== "settings").map((p) => p.id),
-  reception: ["dashboard", "notifications", "rooms", "check_in", "guests", "bookings", "invoices"],
+  reception: [
+    "dashboard",
+    "notifications",
+    "rooms",
+    "check_in",
+    "guests",
+    "bookings",
+    "invoices",
+    "reports",
+  ],
   housekeeping: ["dashboard", "notifications", "rooms", "housekeeping"],
   restaurant: ["dashboard", "notifications", "counter", "orders", "menu"],
-  accountant: ["dashboard", "notifications", "accounts", "invoices"],
+  accountant: ["dashboard", "notifications", "accounts", "invoices", "reports"],
 };

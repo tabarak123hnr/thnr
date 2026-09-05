@@ -9,7 +9,7 @@ export async function downloadInvoicePdf(
   const canvas = await html2canvas(element, {
     scale: 2,
     useCORS: true,
-    backgroundColor: "#fffcf7",
+    backgroundColor: "#ffffff",
     logging: false,
   });
 
@@ -54,13 +54,14 @@ export function printInvoiceElement(element: HTMLElement, title: string) {
     body {
       margin: 0;
       padding: 16px;
-      background: #e8e4dc;
+      background: #ffffff;
+      color: #000000;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
     @page { margin: 10mm; size: A4; }
     @media print {
-      body { background: #fff; padding: 0; }
+      body { background: #ffffff; padding: 0; }
     }
   `;
 
@@ -74,7 +75,6 @@ export function printInvoiceElement(element: HTMLElement, title: string) {
   clone.style.margin = "0 auto";
   win.document.body.appendChild(clone);
 
-  // Wait for layout, then print
   win.focus();
   setTimeout(() => {
     win.print();
