@@ -53,7 +53,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const { to, subject, text, html, replyTo } = req.body || {};
+    const { to, subject, text, html, replyTo, attachments } = req.body || {};
     if (!to || typeof to !== "string" || !to.includes("@")) {
       return res.status(400).json({ error: "Valid guest email (to) is required." });
     }
@@ -68,6 +68,7 @@ export default async function handler(req, res) {
       text: String(text),
       html: html ? String(html) : undefined,
       replyTo: replyTo ? String(replyTo) : undefined,
+      attachments: Array.isArray(attachments) ? attachments : undefined,
     });
 
     return res.status(200).json({ ok: true });
