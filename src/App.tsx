@@ -10,6 +10,8 @@ import { CheckInPage } from "./pages/CheckInPage";
 import { CounterPage } from "./pages/CounterPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EmployeesPage } from "./pages/EmployeesPage";
+import { FeedbackPage } from "./pages/FeedbackPage";
+import { GuestFeedbackPage } from "./pages/GuestFeedbackPage";
 import { GuestsPage } from "./pages/GuestsPage";
 import { HousekeepingPage } from "./pages/HousekeepingPage";
 import { InvoicesPage } from "./pages/InvoicesPage";
@@ -31,6 +33,7 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/feedback" element={<GuestFeedbackPage />} />
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>
                 <Route index element={<DashboardPage />} />
@@ -41,6 +44,7 @@ export default function App() {
                 <Route path="booking-requests" element={<BookingRequestsPage />} />
                 <Route path="housekeeping" element={<HousekeepingPage />} />
                 <Route path="qr-cards" element={<QrCardsPage />} />
+                <Route path="feedbacks" element={<FeedbackPage />} />
                 <Route path="counter" element={<CounterPage />} />
                 <Route path="orders" element={<OrdersPage />} />
                 <Route path="menu" element={<MenuPage />} />

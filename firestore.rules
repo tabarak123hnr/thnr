@@ -125,6 +125,35 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Guest feedback — anyone can submit; only staff can read/manage
+    match /feedback/{feedbackId} {
+      allow create: if request.resource.data.keys().hasAll([
+          'guestName', 'phone', 'email', 'roomNumber',
+          'rating', 'category', 'message', 'status',
+          'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.guestName is string
+        && request.resource.data.guestName.size() > 0
+        && request.resource.data.guestName.size() <= 120
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() <= 40
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 120
+        && request.resource.data.roomNumber is string
+        && request.resource.data.roomNumber.size() <= 20
+        && request.resource.data.rating is number
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && request.resource.data.category in [
+          'hotel', 'restaurant', 'staff', 'cleanliness', 'other'
+        ]
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 4000
+        && request.resource.data.status == 'new';
+      allow read, update, delete: if signedIn();
+    }
+
     // Rest of the app data — signed-in staff for now
     match /{document=**} {
       allow read, write: if signedIn();

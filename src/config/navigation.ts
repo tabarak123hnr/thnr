@@ -70,6 +70,13 @@ export const navigation: NavSection[] = [
         labelKey: "qrCards",
         permission: "qr_cards",
       },
+      {
+        id: "feedback",
+        path: "/feedbacks",
+        icon: "MessageSquare",
+        labelKey: "feedback",
+        permission: "feedback",
+      },
     ],
   },
   {
