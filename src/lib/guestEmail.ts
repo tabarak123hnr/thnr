@@ -4,7 +4,7 @@ import {
   resolveAmountPaid,
   resolveBalanceDue,
 } from "./paymentDisplay";
-import { getFeedbackLink, getFeedbackQrImageUrl } from "./feedbackLink";
+import { getFeedbackLink, FEEDBACK_QR_CID, loadFeedbackQrAttachment } from "./feedbackLink";
 import { formatRs } from "./utils";
 import type { CheckInRecord, PaymentStatus, PaymentTiming } from "../types/checkIn";
 
@@ -90,7 +90,7 @@ export function buildGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
     ``,
     `We look forward to hosting you.`,
     getFeedbackLink()
-      ? `Share feedback: ${getFeedbackLink()}`
+      ? `Scan the QR code in this email to give feedback.`
       : "",
     `${hotelName}`,
   ]
@@ -104,31 +104,23 @@ export function buildGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
   const statusText = paymentStatusLabel(payload.paymentStatus);
   const planText = paymentPlanLabel(payload.paymentTiming);
   const dueColor = payload.balanceDue > 0 ? "#c0392b" : "#1a7f4b";
-  const feedbackLink = getFeedbackLink();
-  const feedbackQr = getFeedbackQrImageUrl(150);
-  const feedbackBlock =
-    feedbackLink && feedbackQr
-      ? `<tr>
+  const feedbackBlock = `<tr>
             <td style="padding:8px 18px 6px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#111111;border-radius:12px;">
                 <tr>
                   <td style="padding:18px 16px;font-family:Segoe UI,Helvetica Neue,Arial,sans-serif;text-align:center;">
                     <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#c5a059;">
-                      Your feedback
+                      Feedback
                     </p>
-                    <p style="margin:8px 0 14px;font-size:13px;color:#e8e4dc;line-height:1.45;">
-                      Scan this QR code to rate your stay
+                    <p style="margin:8px 0 14px;font-size:14px;color:#e8e4dc;line-height:1.45;">
+                      Scan to give feedback
                     </p>
-                    <img src="${escapeHtml(feedbackQr)}" width="150" height="150" alt="Feedback QR code" style="display:block;margin:0 auto;border-radius:8px;background:#ffffff;padding:6px;" />
-                    <p style="margin:12px 0 0;font-size:11px;color:#999999;word-break:break-all;">
-                      Or open: <a href="${escapeHtml(feedbackLink)}" style="color:#c5a059;text-decoration:underline;">${escapeHtml(feedbackLink)}</a>
-                    </p>
+                    <img src="cid:${FEEDBACK_QR_CID}" width="160" height="160" alt="Scan to give feedback" style="display:block;margin:0 auto;border-radius:8px;background:#ffffff;padding:8px;" />
                   </td>
                 </tr>
               </table>
             </td>
-          </tr>`
-      : "";
+          </tr>`;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -321,6 +313,7 @@ export async function sendGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
   }
 
   const { subject, text, html } = buildGuestCheckInEmail(payload);
+  const qrAttachment = await loadFeedbackQrAttachment();
   const url = emailApiUrl("/api/send-guest-email");
 
   let res: Response;
@@ -334,6 +327,7 @@ export async function sendGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
         text,
         html,
         replyTo: to,
+        attachments: qrAttachment ? [qrAttachment] : [],
       }),
     });
   } catch {

@@ -46,7 +46,7 @@ function createTransport() {
 
 const app = express();
 app.use(cors({ origin: true }));
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "3mb" }));
 
 app.get("/api/email/status", (_req, res) => {
   res.json({
@@ -65,7 +65,7 @@ app.post("/api/send-guest-email", async (req, res) => {
       });
     }
 
-    const { to, subject, text, html, replyTo } = req.body || {};
+    const { to, subject, text, html, replyTo, attachments } = req.body || {};
     if (!to || typeof to !== "string" || !to.includes("@")) {
       return res.status(400).json({ error: "Valid guest email (to) is required." });
     }
@@ -85,6 +85,7 @@ app.post("/api/send-guest-email", async (req, res) => {
       text: String(text),
       html: html ? String(html) : undefined,
       replyTo: replyTo ? String(replyTo) : undefined,
+      attachments: Array.isArray(attachments) ? attachments : undefined,
     });
 
     return res.json({ ok: true });

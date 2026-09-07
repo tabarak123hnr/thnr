@@ -1,52 +1,50 @@
-import { QrCode } from "lucide-react";
+import { Download } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { PageHeader } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
-import { rooms } from "../data/mock";
+import { FEEDBACK_QR_PATH } from "../lib/feedbackLink";
 
 export function QrCardsPage() {
   const { t } = useApp();
+  const f = t.feedback;
 
   return (
     <div>
       <PageHeader
         title={t.pages.qrTitle}
         subtitle={t.pages.qrSub}
-        actions={
-          <>
-            <Button variant="secondary" className="w-full sm:w-auto">
-              Print selected
-            </Button>
-            <Button className="w-full sm:w-auto">Generate all</Button>
-          </>
-        }
       />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        <Card className="flex flex-col items-center text-center">
-          <div className="flex h-28 w-28 items-center justify-center rounded-2xl border border-dashed border-app bg-app">
-            <QrCode className="h-14 w-14 text-[var(--accent)]" />
+
+      <div className="mx-auto max-w-md">
+        <Card className="flex flex-col items-center text-center !p-6 sm:!p-8">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
+            {t.brand}
+          </p>
+          <h2 className="mt-2 text-xl font-extrabold tracking-tight">{f.qrCardTitle}</h2>
+          <p className="mt-1 text-sm text-muted">{f.qrCardSub}</p>
+
+          <div className="mt-6 rounded-2xl border border-app bg-white p-4 shadow-sm">
+            <img
+              src={FEEDBACK_QR_PATH}
+              alt={f.qrCardTitle}
+              className="h-52 w-52 object-contain sm:h-56 sm:w-56"
+            />
           </div>
-          <p className="mt-4 font-bold">Restaurant menu</p>
-          <p className="mt-1 text-xs text-muted">Guest Wi‑Fi → digital menu</p>
-          <Button size="sm" variant="secondary" className="mt-4">
-            Download
-          </Button>
-        </Card>
-        {rooms.slice(0, 7).map((room) => (
-          <Card key={room.id} className="flex flex-col items-center text-center">
-            <div className="flex h-28 w-28 items-center justify-center rounded-2xl border border-dashed border-app bg-app">
-              <QrCode className="h-14 w-14 text-[var(--text)]" />
-            </div>
-            <p className="mt-4 font-bold">
-              {t.common.room} {room.number}
-            </p>
-            <p className="mt-1 text-xs text-muted">Room service + requests</p>
-            <Button size="sm" variant="secondary" className="mt-4">
-              Download
+
+          <p className="mt-4 text-sm font-semibold">{f.scanToFeedback}</p>
+
+          <a href={FEEDBACK_QR_PATH} download="tabarak-feedback-qr.png" className="mt-5">
+            <Button
+              type="button"
+              variant="secondary"
+              className="cursor-pointer"
+              icon={<Download className="h-4 w-4" />}
+            >
+              {f.downloadQr}
             </Button>
-          </Card>
-        ))}
+          </a>
+        </Card>
       </div>
     </div>
   );

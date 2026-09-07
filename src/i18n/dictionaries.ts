@@ -152,7 +152,7 @@ export const en = {
     housekeepingTitle: "Housekeeping",
     housekeepingSub: "Cleaning queue by room priority and shift.",
     qrTitle: "QR cards",
-    qrSub: "Room and menu QR codes for guests and staff.",
+    qrSub: "Guest QR codes — feedback now; menu coming later.",
     counterTitle: "Counter",
     counterSub: "Room-service POS — tap the menu, bill an in-house guest, send to kitchen.",
     ordersTitle: "Orders",
@@ -331,6 +331,10 @@ export const en = {
     deleteConfirm: "Delete this feedback permanently?",
     deleted: "Feedback deleted",
     deleteFailed: "Delete failed",
+    qrCardTitle: "Guest feedback",
+    qrCardSub: "Print or share this QR so guests can leave a review.",
+    scanToFeedback: "Scan to give feedback",
+    downloadQr: "Download QR",
   },
 };
 
@@ -494,7 +498,7 @@ export const ur: TranslationKeys = {
     housekeepingTitle: "ہاؤس کیپنگ",
     housekeepingSub: "کمرے کی ترجیح کے مطابق صفائی کی قطار۔",
     qrTitle: "کیو آر کارڈز",
-    qrSub: "مہمان اور عملے کے لیے کمرہ اور مینو کیو آر۔",
+    qrSub: "مہمان کیو آر — فیڈبیک اب؛ مینو جلد۔",
     counterTitle: "کاؤنٹر",
     counterSub: "روم سروس POS — مینو پر ٹیپ کریں، مہمان کو بل کریں، کچن بھیجیں۔",
     ordersTitle: "آرڈرز",
@@ -673,6 +677,10 @@ export const ur: TranslationKeys = {
     deleteConfirm: "یہ فیڈبیک مستقل حذف کریں؟",
     deleted: "فیڈبیک حذف ہو گئی",
     deleteFailed: "حذف ناکام",
+    qrCardTitle: "مہمان فیڈبیک",
+    qrCardSub: "اس QR کو پرنٹ یا شیئر کریں تاکہ مہمان رائے دے سکیں۔",
+    scanToFeedback: "فیڈبیک کے لیے اسکین کریں",
+    downloadQr: "QR ڈاؤن لوڈ",
   },
 };
 
