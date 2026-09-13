@@ -2,6 +2,7 @@ import type { CheckInRecord } from "../types/checkIn";
 import type { ExpenseCategory, ExpenseRecord } from "../types/expense";
 import { EXPENSE_CATEGORIES } from "../types/expense";
 import type { FoodOrder } from "../types/order";
+import { formatRs } from "./utils";
 
 export type AccountsPeriod = "today" | "week" | "month" | "all";
 
@@ -283,6 +284,50 @@ export function checkoutGapFlags(row: CheckInRecord): CheckoutGapFlag[] {
   if (flags.length === 0 && due <= 0) flags.push("fully_settled");
 
   return flags;
+}
+
+/** One plain-English line for staff — replaces stacked cryptic badges. */
+export function checkoutPaymentSummary(
+  row: CheckInRecord,
+  rs = "Rs",
+): { tone: "success" | "warning" | "danger" | "muted"; text: string } {
+  const room = Math.max(0, Number(row.roomCharges) || 0);
+  const extras = Math.max(0, Number(row.extraCharges) || 0);
+  const paid = Math.max(0, Number(row.amountPaid) || 0);
+  const due = Math.max(0, Number(row.balanceDue) || 0);
+  const total = Math.max(0, Number(row.totalBill) || room + extras);
+
+  if (due > 0.5) {
+    return {
+      tone: "danger",
+      text: `Still owes ${formatRs(due, rs)}. Guest paid ${formatRs(paid, rs)} out of ${formatRs(total, rs)}.`,
+    };
+  }
+
+  if (paid + 0.5 >= total) {
+    if (extras > 0) {
+      return {
+        tone: "success",
+        text: `Paid in full (${formatRs(paid, rs)}). Includes room ${formatRs(room, rs)} + extras ${formatRs(extras, rs)}.`,
+      };
+    }
+    return {
+      tone: "success",
+      text: `Paid in full — ${formatRs(paid, rs)}. Nothing left to collect.`,
+    };
+  }
+
+  if (row.paymentTiming === "partial") {
+    return {
+      tone: "warning",
+      text: `Partial payment plan. Paid ${formatRs(paid, rs)} of ${formatRs(total, rs)}.`,
+    };
+  }
+
+  return {
+    tone: "muted",
+    text: `Paid ${formatRs(paid, rs)} · Bill ${formatRs(total, rs)}.`,
+  };
 }
 
 export function todayIsoDate(now = new Date()) {

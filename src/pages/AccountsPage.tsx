@@ -19,14 +19,13 @@ import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
 import {
   buildAccountsSnapshot,
-  checkoutGapFlags,
+  checkoutPaymentSummary,
   dateStringInRange,
   listCheckoutsInPeriod,
   listOpenBalanceStays,
   rangeForPeriod,
   todayIsoDate,
   type AccountsPeriod,
-  type CheckoutGapFlag,
 } from "../lib/accountsFinance";
 import { downloadCsv, toCsv } from "../lib/exportSpreadsheet";
 import {
@@ -158,47 +157,6 @@ export function AccountsPage() {
     if (categoryFilter === "all") return periodExpenses;
     return periodExpenses.filter((e) => e.category === categoryFilter);
   }, [periodExpenses, categoryFilter]);
-
-  function gapLabel(flag: CheckoutGapFlag): string {
-    switch (flag) {
-      case "owes_balance":
-        return a.flagOwes;
-      case "partial_plan":
-        return a.flagPartial;
-      case "due_on_checkout":
-        return a.flagDueCheckout;
-      case "paid_covers_extras":
-        return a.flagCoversExtras;
-      case "paid_below_room":
-        return a.flagBelowRoom;
-      case "paid_above_room":
-        return a.flagAboveRoom;
-      case "fully_settled":
-        return a.flagSettled;
-      default:
-        return flag;
-    }
-  }
-
-  function gapTone(
-    flag: CheckoutGapFlag,
-  ): "danger" | "warning" | "info" | "gold" | "success" | "muted" {
-    switch (flag) {
-      case "owes_balance":
-      case "paid_below_room":
-        return "danger";
-      case "partial_plan":
-      case "due_on_checkout":
-        return "warning";
-      case "paid_covers_extras":
-      case "paid_above_room":
-        return "info";
-      case "fully_settled":
-        return "success";
-      default:
-        return "muted";
-    }
-  }
 
   const maxCategory = snapshot.byCategory[0]?.amount || 0;
 
@@ -728,91 +686,104 @@ export function AccountsPage() {
             {periodCheckouts.length === 0 ? (
               <EmptyState message={a.noCheckouts} />
             ) : (
-              <Table
-                headers={[
-                  t.common.guest,
-                  t.common.room,
-                  t.common.checkOut,
-                  a.roomChargesCol,
-                  a.colExtras,
-                  a.colTotalBill,
-                  a.colPaid,
-                  a.colBalance,
-                  a.colPlan,
-                  t.status,
-                  a.colWhy,
-                ]}
-                colWidths={[
-                  "12%",
-                  "7%",
-                  "9%",
-                  "9%",
-                  "8%",
-                  "9%",
-                  "8%",
-                  "8%",
-                  "10%",
-                  "8%",
-                  "12%",
-                ]}
-              >
+              <div className="space-y-3">
                 {periodCheckouts.map((row) => {
-                  const flags = checkoutGapFlags(row);
+                  const summary = checkoutPaymentSummary(row, t.common.rs);
+                  const checkoutDate = formatDate(
+                    (row.checkedOutAt
+                      ? String(row.checkedOutAt).slice(0, 10)
+                      : row.checkOutAt.slice(0, 10)) || "",
+                  );
                   return (
-                    <Tr key={row.id}>
-                      <Td>
-                        <p className="font-semibold">{row.guestName}</p>
-                        <p className="text-xs text-muted">{row.phone || "—"}</p>
-                      </Td>
-                      <Td className="font-medium">{row.roomNumber}</Td>
-                      <Td className="text-muted">
-                        {formatDate(
-                          (row.checkedOutAt
-                            ? String(row.checkedOutAt).slice(0, 10)
-                            : row.checkOutAt.slice(0, 10)) || "",
-                        )}
-                      </Td>
-                      <Td className="tabular-nums font-medium">
-                        {formatRs(row.roomCharges || 0, t.common.rs)}
-                      </Td>
-                      <Td className="tabular-nums text-muted">
-                        {formatRs(row.extraCharges || 0, t.common.rs)}
-                      </Td>
-                      <Td className="tabular-nums font-semibold">
-                        {formatRs(row.totalBill || 0, t.common.rs)}
-                      </Td>
-                      <Td className="tabular-nums text-emerald-700">
-                        {formatRs(row.amountPaid || 0, t.common.rs)}
-                      </Td>
-                      <Td
-                        className={cn(
-                          "tabular-nums font-semibold",
-                          (row.balanceDue || 0) > 0 ? "text-red-700" : "text-muted",
-                        )}
-                      >
-                        {formatRs(row.balanceDue || 0, t.common.rs)}
-                      </Td>
-                      <Td className="text-xs text-muted">
-                        {paymentPlanLabel(row.paymentTiming)}
-                      </Td>
-                      <Td>
+                    <div
+                      key={row.id}
+                      className="rounded-2xl border border-app bg-app px-4 py-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-base font-extrabold">{row.guestName}</p>
+                          <p className="mt-0.5 text-sm text-muted">
+                            {t.common.room} {row.roomNumber}
+                            {row.phone ? ` · ${row.phone}` : ""}
+                            {" · "}
+                            {checkoutDate}
+                          </p>
+                          <p className="mt-1 text-xs text-muted">
+                            {a.colPlan}: {paymentPlanLabel(row.paymentTiming)}
+                          </p>
+                        </div>
                         <Badge tone={paymentStatusTone(row.paymentStatus)}>
                           {paymentStatusLabel(row.paymentStatus)}
                         </Badge>
-                      </Td>
-                      <Td>
-                        <div className="flex flex-wrap gap-1">
-                          {flags.map((f) => (
-                            <Badge key={f} tone={gapTone(f)}>
-                              {gapLabel(f)}
-                            </Badge>
-                          ))}
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                        <div className="rounded-xl border border-app bg-elevated px-3 py-2.5">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                            {a.roomChargesCol}
+                          </p>
+                          <p className="mt-1 text-sm font-bold tabular-nums">
+                            {formatRs(row.roomCharges || 0, t.common.rs)}
+                          </p>
                         </div>
-                      </Td>
-                    </Tr>
+                        <div className="rounded-xl border border-app bg-elevated px-3 py-2.5">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                            {a.colExtras}
+                          </p>
+                          <p className="mt-1 text-sm font-bold tabular-nums">
+                            {formatRs(row.extraCharges || 0, t.common.rs)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-app bg-elevated px-3 py-2.5">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                            {a.colTotalBill}
+                          </p>
+                          <p className="mt-1 text-sm font-bold tabular-nums">
+                            {formatRs(row.totalBill || 0, t.common.rs)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-app bg-elevated px-3 py-2.5">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                            {a.colPaid}
+                          </p>
+                          <p className="mt-1 text-sm font-bold tabular-nums text-emerald-700">
+                            {formatRs(row.amountPaid || 0, t.common.rs)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-app bg-elevated px-3 py-2.5 col-span-2 sm:col-span-1">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                            {a.colBalance}
+                          </p>
+                          <p
+                            className={cn(
+                              "mt-1 text-sm font-bold tabular-nums",
+                              (row.balanceDue || 0) > 0 ? "text-red-700" : "text-muted",
+                            )}
+                          >
+                            {formatRs(row.balanceDue || 0, t.common.rs)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div
+                        className={cn(
+                          "mt-3 rounded-xl border px-3 py-2.5 text-sm leading-relaxed",
+                          summary.tone === "success" &&
+                            "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200",
+                          summary.tone === "danger" &&
+                            "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200",
+                          summary.tone === "warning" &&
+                            "border-orange-200 bg-orange-50 text-orange-900 dark:border-orange-900 dark:bg-orange-950/30 dark:text-orange-200",
+                          summary.tone === "muted" && "border-app bg-elevated text-muted",
+                        )}
+                      >
+                        <span className="font-semibold text-app">{a.colSummary}: </span>
+                        {summary.text}
+                      </div>
+                    </div>
                   );
                 })}
-              </Table>
+              </div>
             )}
           </Card>
 

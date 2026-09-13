@@ -297,12 +297,12 @@ export const GuestInvoiceDocument = forwardRef<
         {/* Footer */}
         <div
           style={{
-            marginTop: 36,
-            paddingTop: 16,
+            marginTop: 56,
+            paddingTop: 28,
             borderTop: `1px solid ${LINE}`,
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: 24,
+            gap: 28,
           }}
         >
           <div>
@@ -324,9 +324,62 @@ export const GuestInvoiceDocument = forwardRef<
           </div>
         </div>
 
+        {/* Signature lines for printed copies */}
+        <div
+          style={{
+            marginTop: 48,
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 48,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                borderBottom: `1px solid ${RULE}`,
+                height: 48,
+                marginBottom: 8,
+              }}
+            />
+            <p
+              style={{
+                margin: 0,
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: MUTED,
+              }}
+            >
+              Guest signature
+            </p>
+          </div>
+          <div>
+            <div
+              style={{
+                borderBottom: `1px solid ${RULE}`,
+                height: 48,
+                marginBottom: 8,
+              }}
+            />
+            <p
+              style={{
+                margin: 0,
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: MUTED,
+              }}
+            >
+              Owner signature
+            </p>
+          </div>
+        </div>
+
         <p
           style={{
-            margin: "28px 0 0",
+            margin: "32px 0 0",
             textAlign: "center",
             fontSize: 11,
             color: MUTED,

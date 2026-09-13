@@ -6,7 +6,6 @@ import { Card } from "../components/ui/Card";
 import { FancySelect, SelectField } from "../components/ui/FancySelect";
 import { Modal } from "../components/ui/Modal";
 import { Field, Input, PageHeader, StatCard, TextArea } from "../components/ui/Page";
-import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
 import { uploadImageToCloudinary } from "../lib/cloudinary";
@@ -509,91 +508,78 @@ export function HousekeepingPage() {
             </p>
           </div>
         </div>
-        <Table
-          headers={[
-            t.common.room,
-            t.common.type,
-            "Priority",
-            "Who is cleaning",
-            "Due",
-            t.status,
-            "Photos",
-            t.common.actions,
-          ]}
-          colWidths={["8%", "12%", "9%", "14%", "12%", "12%", "14%", "19%"]}
-        >
-          {filtered.length === 0 ? (
-            <Tr>
-              <Td className="text-muted" colSpan={8}>
-                No tasks here. When a guest checks out, a “Needs cleaning” task appears — Assign
-                someone with a dirty-room photo, then Mark done.
-              </Td>
-            </Tr>
-          ) : (
-            filtered.map((task) => (
-              <Tr key={task.id}>
-                <Td className="font-bold">
-                  {t.common.room} {task.roomNumber}
-                </Td>
-                <Td>{typeLabel[task.type]}</Td>
-                <Td>
-                  <Badge tone={priorityTone[task.priority]}>{task.priority}</Badge>
-                </Td>
-                <Td>
-                  {task.assigneeName ? (
-                    task.assigneeName
-                  ) : (
-                    <span className="text-muted">Not assigned</span>
-                  )}
-                </Td>
-                <Td className="text-muted">{formatDue(task.dueAt)}</Td>
-                <Td>
-                  <Badge tone={statusTone[task.status]}>{statusLabel[task.status]}</Badge>
-                </Td>
-                <Td>
-                  <div className="flex gap-1.5">
-                    {task.dirtyRoomImageUrl ? (
-                      <a
-                        href={task.dirtyRoomImageUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Dirty room"
-                        className="block h-10 w-10 overflow-hidden rounded-lg border border-app"
-                      >
-                        <img
-                          src={task.dirtyRoomImageUrl}
-                          alt="Dirty room"
-                          className="h-full w-full object-cover"
-                        />
-                      </a>
-                    ) : null}
-                    {task.cleanRoomImageUrl ? (
-                      <a
-                        href={task.cleanRoomImageUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Clean room"
-                        className="block h-10 w-10 overflow-hidden rounded-lg border border-app"
-                      >
-                        <img
-                          src={task.cleanRoomImageUrl}
-                          alt="Clean room"
-                          className="h-full w-full object-cover"
-                        />
-                      </a>
-                    ) : null}
-                    {!task.dirtyRoomImageUrl && !task.cleanRoomImageUrl ? (
-                      <span className="text-xs text-muted">—</span>
-                    ) : null}
+        {filtered.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-app px-4 py-8 text-center text-sm text-muted">
+            No tasks here. When a guest checks out, a “Needs cleaning” task appears — Assign someone
+            with a dirty-room photo, then Mark done.
+          </p>
+        ) : (
+          <div className="grid gap-3">
+            {filtered.map((task) => (
+              <div
+                key={task.id}
+                className="rounded-2xl border border-app bg-app px-4 py-3.5"
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-base font-extrabold">
+                        {t.common.room} {task.roomNumber}
+                      </p>
+                      <Badge tone={statusTone[task.status]}>{statusLabel[task.status]}</Badge>
+                      <Badge tone={priorityTone[task.priority]}>{task.priority}</Badge>
+                    </div>
+                    <p className="mt-1 text-sm text-muted">{typeLabel[task.type]}</p>
+                    <p className="mt-1 text-sm">
+                      <span className="text-muted">Who: </span>
+                      <span className="font-semibold">
+                        {task.assigneeName || "Not assigned"}
+                      </span>
+                      <span className="mx-1.5 text-muted">·</span>
+                      <span className="text-muted">Due: </span>
+                      <span className="font-medium">{formatDue(task.dueAt)}</span>
+                    </p>
+                    {(task.dirtyRoomImageUrl || task.cleanRoomImageUrl) && (
+                      <div className="mt-2.5 flex gap-2">
+                        {task.dirtyRoomImageUrl ? (
+                          <a
+                            href={task.dirtyRoomImageUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Dirty room"
+                            className="block h-14 w-14 overflow-hidden rounded-xl border border-app sm:h-12 sm:w-12"
+                          >
+                            <img
+                              src={task.dirtyRoomImageUrl}
+                              alt="Dirty room"
+                              className="h-full w-full object-cover"
+                            />
+                          </a>
+                        ) : null}
+                        {task.cleanRoomImageUrl ? (
+                          <a
+                            href={task.cleanRoomImageUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Clean room"
+                            className="block h-14 w-14 overflow-hidden rounded-xl border border-app sm:h-12 sm:w-12"
+                          >
+                            <img
+                              src={task.cleanRoomImageUrl}
+                              alt="Clean room"
+                              className="h-full w-full object-cover"
+                            />
+                          </a>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
-                </Td>
-                <Td>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
                     {task.status === "pending" ? (
                       <Button
                         size="sm"
                         variant="gold"
-                        className="cursor-pointer"
+                        className="flex-1 cursor-pointer justify-center sm:flex-none"
                         icon={<UserPlus className="h-3.5 w-3.5" />}
                         onClick={() => openAssign(task)}
                       >
@@ -603,7 +589,7 @@ export function HousekeepingPage() {
                     {task.status === "in_progress" ? (
                       <Button
                         size="sm"
-                        className="cursor-pointer"
+                        className="flex-1 cursor-pointer justify-center sm:flex-none"
                         icon={<Check className="h-3.5 w-3.5" />}
                         onClick={() => openMarkDone(task)}
                       >
@@ -613,18 +599,18 @@ export function HousekeepingPage() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="cursor-pointer"
+                      className="flex-1 cursor-pointer justify-center sm:flex-none"
                       icon={<Pencil className="h-3.5 w-3.5" />}
                       onClick={() => openEdit(task)}
                     >
                       Edit
                     </Button>
                   </div>
-                </Td>
-              </Tr>
-            ))
-          )}
-        </Table>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       <Modal

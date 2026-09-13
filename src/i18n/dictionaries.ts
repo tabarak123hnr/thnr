@@ -9,6 +9,10 @@ export const en = {
   language: "English",
   darkMode: "Dark",
   lightMode: "Light",
+  appFooter: {
+    rights: "All rights reserved.",
+    developedBy: "Developed by",
+  },
   login: {
     eyebrow: "Staff access",
     heroTitle: "Run the hotel from one calm desk.",
@@ -262,7 +266,7 @@ export const en = {
     settlementSub: "Collected, still to collect, and partial payments on open stays.",
     checkoutDetailTitle: "Period checkouts — billed vs paid",
     checkoutDetailSub:
-      "Room revenue sums room charges. Collected sums amount paid on the whole bill (room + extras).",
+      "Each stay shows room, extras, what was paid, and a short summary anyone can read.",
     openBalancesTitle: "In-house guests still owing",
     openBalancesSub: "Checked-in stays with a balance due (counts toward Outstanding).",
     colExtras: "Extras",
@@ -271,6 +275,7 @@ export const en = {
     colBalance: "Balance due",
     colPlan: "Payment plan",
     colWhy: "Why it differs",
+    colSummary: "Summary",
     flagOwes: "Still owes balance",
     flagPartial: "Partial at check-in",
     flagDueCheckout: "Due on checkout",
@@ -280,7 +285,7 @@ export const en = {
     flagSettled: "Fully settled",
     noCheckouts: "No checkouts in this period.",
     noOpenBalances: "No in-house guests with a balance due.",
-    roomChargesCol: "Room charges",
+    roomChargesCol: "Room",
   },
   feedback: {
     formTitle: "Share your feedback",
@@ -355,6 +360,10 @@ export const ur: TranslationKeys = {
   language: "اردو",
   darkMode: "ڈارک",
   lightMode: "لائیٹ",
+  appFooter: {
+    rights: "جملہ حقوق محفوظ ہیں۔",
+    developedBy: "تیار کردہ",
+  },
   login: {
     eyebrow: "عملے کی رسائی",
     heroTitle: "پورا ہوٹل ایک پرسکون ڈیسک سے چلائیں۔",
@@ -608,7 +617,7 @@ export const ur: TranslationKeys = {
     settlementSub: "وصول شدہ، باقی، اور ان ہاؤس جزوی ادائیگیاں۔",
     checkoutDetailTitle: "مدت کے چیک آؤٹ — بل بمقابلہ ادا شدہ",
     checkoutDetailSub:
-      "کمرے کی آمدنی کمرے کے چارجز کا مجموعہ ہے۔ وصول شدہ پورے بل (کمرہ + اضافی) پر ادا شدہ رقم ہے۔",
+      "ہر قیام میں کمرہ، اضافی، ادا شدہ رقم، اور ایک آسان خلاصہ دکھایا جاتا ہے۔",
     openBalancesTitle: "ان ہاؤس مہمان جن پر بقایا ہے",
     openBalancesSub: "چیک ان قیام جن پر بیلنس باقی ہے (Outstanding میں شمار)۔",
     colExtras: "اضافی",
@@ -617,6 +626,7 @@ export const ur: TranslationKeys = {
     colBalance: "بقایا",
     colPlan: "ادائیگی منصوبہ",
     colWhy: "فرق کی وجہ",
+    colSummary: "خلاصہ",
     flagOwes: "ابھی بقایا ہے",
     flagPartial: "چیک ان پر جزوی",
     flagDueCheckout: "چیک آؤٹ پر واجب",
@@ -626,7 +636,7 @@ export const ur: TranslationKeys = {
     flagSettled: "مکمل ادا",
     noCheckouts: "اس مدت میں کوئی چیک آؤٹ نہیں۔",
     noOpenBalances: "کسی ان ہاؤس مہمان پر بقایا نہیں۔",
-    roomChargesCol: "کمرے کے چارجز",
+    roomChargesCol: "کمرہ",
   },
   feedback: {
     formTitle: "اپنی رائے دیں",
