@@ -422,6 +422,7 @@ export function ReportsPage() {
         nights: row.nights,
         roomCharges: row.roomCharges || 0,
         extras: row.extraCharges || 0,
+        discountPercent: row.discountPercent || 0,
         totalBill: row.totalBill || 0,
         paid: stayAmountPaid(row),
         balanceDue: stayBalanceDue(row),
@@ -442,6 +443,7 @@ export function ReportsPage() {
         nights: "",
         roomCharges: "",
         extras: "",
+        discountPercent: "",
         totalBill: o.amount || 0,
         paid: o.paymentStatus === "paid" ? o.amount || 0 : 0,
         balanceDue: o.paymentStatus === "paid" ? 0 : o.amount || 0,
@@ -462,6 +464,7 @@ export function ReportsPage() {
         nights: inv.nights,
         roomCharges: inv.roomCharges,
         extras: inv.extraCharges,
+        discountPercent: inv.discountPercent || 0,
         totalBill: inv.totalBill,
         paid: inv.amountPaid,
         balanceDue: inv.balanceDue,
@@ -489,6 +492,7 @@ export function ReportsPage() {
           { header: "Status", value: (r) => r.status },
           { header: "Nights", value: (r) => r.nights },
           { header: "Room charges", value: (r) => r.roomCharges },
+          { header: "Discount %", value: (r) => r.discountPercent },
           { header: "Extras", value: (r) => r.extras },
           { header: "Total", value: (r) => r.totalBill },
           { header: "Paid", value: (r) => r.paid },
@@ -808,6 +812,11 @@ export function ReportsPage() {
                                   {" "}
                                   + {formatRs(row.extraCharges || 0, t.common.rs)}
                                 </span>
+                                {row.discountPercent > 0 ? (
+                                  <span className="ml-1 font-normal text-muted">
+                                    · {row.discountPercent}% off
+                                  </span>
+                                ) : null}
                               </p>
                             </div>
                             <div className="rounded-xl border border-app bg-elevated px-3 py-2.5">
@@ -845,6 +854,9 @@ export function ReportsPage() {
                                 {formatRs(row.nightlyRate || 0, t.common.rs)}
                               </strong>
                               /night
+                              {row.discountPercent > 0
+                                ? ` · ${row.discountPercent}% off`
+                                : ""}
                             </span>
                             <span>
                               Checked in by:{" "}

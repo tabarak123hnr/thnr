@@ -35,16 +35,27 @@ function formatDateTime(value: string) {
 }
 
 function resolveBill(row: CheckInRecord, rooms: HotelRoom[]) {
+  const rate = row.nightlyRate || rooms.find((r) => r.id === row.roomId)?.rate || 0;
+  const computed = calcRoomBill(
+    rate,
+    row.checkInAt,
+    row.checkOutAt,
+    row.extraCharges || 0,
+    row.discountPercent || 0,
+  );
   if (row.totalBill > 0 && row.nightlyRate > 0) {
     return {
-      nights: row.nights,
+      nights: row.nights || computed.nights,
       nightlyRate: row.nightlyRate,
+      discountedNightlyRate: row.discountedNightlyRate || computed.discountedNightlyRate,
+      discountPercent: row.discountPercent || 0,
+      discountAmount: row.discountAmount || 0,
+      roomCharges: row.roomCharges || computed.roomCharges,
+      extraCharges: row.extraCharges || 0,
       totalBill: row.totalBill,
-      roomCharges: row.roomCharges,
     };
   }
-  const rate = row.nightlyRate || rooms.find((r) => r.id === row.roomId)?.rate || 0;
-  return calcRoomBill(rate, row.checkInAt, row.checkOutAt, row.extraCharges || 0);
+  return computed;
 }
 
 export function GuestsPage() {
@@ -163,6 +174,11 @@ export function GuestsPage() {
                   <Td className="font-semibold">{bill.nights}</Td>
                   <Td className="font-extrabold text-[var(--accent)]">
                     {formatRs(bill.totalBill, t.common.rs)}
+                    {bill.discountPercent > 0 ? (
+                      <p className="text-[11px] font-normal text-muted">
+                        {bill.discountPercent}% off
+                      </p>
+                    ) : null}
                   </Td>
                   <Td>
                     <div className="space-y-1">
@@ -235,7 +251,14 @@ export function GuestsPage() {
                 <Detail label="Checked out by" value={viewRow.checkedOutBy || "—"} />
               ) : null}
               <Detail label="Nights" value={String(viewBill.nights)} />
-              <Detail label={t.common.rate} value={formatRs(viewBill.nightlyRate, t.common.rs)} />
+              <Detail
+                label={t.common.rate}
+                value={
+                  viewBill.discountPercent > 0
+                    ? `${formatRs(viewBill.nightlyRate, t.common.rs)} / night · ${viewBill.discountPercent}% off → ${formatRs(viewBill.discountedNightlyRate, t.common.rs)}`
+                    : formatRs(viewBill.nightlyRate, t.common.rs)
+                }
+              />
               <Detail label="Payment" value={paymentBadge(viewRow).label} />
               <Detail label="Payment plan" value={paymentPlanLabel(viewRow.paymentTiming)} />
               <Detail
@@ -257,6 +280,12 @@ export function GuestsPage() {
               <p className="text-xs font-bold uppercase tracking-wide text-[var(--accent)]">
                 Stay total
               </p>
+              {viewBill.discountPercent > 0 && viewBill.discountAmount > 0 ? (
+                <p className="mt-1 text-sm text-muted">
+                  Discount {viewBill.discountPercent}% (−
+                  {formatRs(viewBill.discountAmount, t.common.rs)})
+                </p>
+              ) : null}
               <p className="mt-1 text-xl font-extrabold text-[var(--accent)]">
                 {formatRs(viewBill.totalBill, t.common.rs)}
               </p>

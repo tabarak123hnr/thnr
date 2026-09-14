@@ -17,6 +17,8 @@ export interface Employee {
   designation: string;
   shift: EmployeeShift;
   status: EmployeeStatus;
+  address: string;
+  backgroundInformation: string;
   notes: string;
   cnicFrontImageUrl: string | null;
   cnicBackImageUrl: string | null;

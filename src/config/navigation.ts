@@ -133,6 +133,20 @@ export const navigation: NavSection[] = [
         permission: "employees",
       },
       {
+        id: "duties-roster",
+        path: "/duties-roster",
+        icon: "ClipboardCheck",
+        labelKey: "dutiesRoster",
+        permission: "duties_roster",
+      },
+      {
+        id: "attendance",
+        path: "/attendance",
+        icon: "Clock",
+        labelKey: "attendance",
+        permission: "attendance",
+      },
+      {
         id: "reports",
         path: "/reports",
         icon: "FileBarChart",

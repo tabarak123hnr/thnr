@@ -87,13 +87,38 @@ export type AccountsSnapshot = {
   partialStayCount: number;
   /** @deprecated alias of toBePaid */
   outstanding: number;
+  /** Operating expenses */
   expenditures: number;
+  /** General & administrative expenses */
+  gaExpenditures: number;
   profit: number;
   checkoutCount: number;
   orderCount: number;
   expenseCount: number;
+  gaCount: number;
   byCategory: CategoryBreakdown[];
+  byGaCategory: CategoryBreakdown[];
 };
+
+function breakdownByCategory(rows: ExpenseRecord[]): CategoryBreakdown[] {
+  const byCategoryMap = new Map<ExpenseCategory, { amount: number; count: number }>();
+  for (const cat of EXPENSE_CATEGORIES) {
+    byCategoryMap.set(cat, { amount: 0, count: 0 });
+  }
+  for (const e of rows) {
+    const row = byCategoryMap.get(e.category) ?? { amount: 0, count: 0 };
+    row.amount += e.amount;
+    row.count += 1;
+    byCategoryMap.set(e.category, row);
+  }
+  return EXPENSE_CATEGORIES.map((category) => ({
+    category,
+    amount: byCategoryMap.get(category)?.amount ?? 0,
+    count: byCategoryMap.get(category)?.count ?? 0,
+  }))
+    .filter((r) => r.amount > 0 || r.count > 0)
+    .sort((a, b) => b.amount - a.amount);
+}
 
 export function buildAccountsSnapshot(
   checkIns: CheckInRecord[],
@@ -154,28 +179,12 @@ export function buildAccountsSnapshot(
     .reduce((s, o) => s + Math.max(0, o.amount || 0), 0);
 
   const expensesInPeriod = expenses.filter((e) => dateStringInRange(e.date, range));
-  const expenditures = expensesInPeriod.reduce(
-    (s, e) => s + Math.max(0, e.amount || 0),
-    0,
-  );
-
-  const byCategoryMap = new Map<ExpenseCategory, { amount: number; count: number }>();
-  for (const cat of EXPENSE_CATEGORIES) {
-    byCategoryMap.set(cat, { amount: 0, count: 0 });
-  }
-  for (const e of expensesInPeriod) {
-    const row = byCategoryMap.get(e.category) ?? { amount: 0, count: 0 };
-    row.amount += e.amount;
-    row.count += 1;
-    byCategoryMap.set(e.category, row);
-  }
-  const byCategory: CategoryBreakdown[] = EXPENSE_CATEGORIES.map((category) => ({
-    category,
-    amount: byCategoryMap.get(category)?.amount ?? 0,
-    count: byCategoryMap.get(category)?.count ?? 0,
-  }))
-    .filter((r) => r.amount > 0 || r.count > 0)
-    .sort((a, b) => b.amount - a.amount);
+  const operating = expensesInPeriod.filter((e) => e.kind !== "ga");
+  const gaRows = expensesInPeriod.filter((e) => e.kind === "ga");
+  const expenditures = operating.reduce((s, e) => s + Math.max(0, e.amount || 0), 0);
+  const gaExpenditures = gaRows.reduce((s, e) => s + Math.max(0, e.amount || 0), 0);
+  const byCategory = breakdownByCategory(operating);
+  const byGaCategory = breakdownByCategory(gaRows);
 
   const inHouse = checkIns.filter((c) => c.status === "checked_in");
   const partialStays = inHouse.filter(
@@ -225,11 +234,14 @@ export function buildAccountsSnapshot(
     partialStayCount: partialStays.length,
     outstanding: toBePaid,
     expenditures,
-    profit: revenue - expenditures,
+    gaExpenditures,
+    profit: revenue - expenditures - gaExpenditures,
     checkoutCount: checkedOutInPeriod.length,
     orderCount: ordersInPeriod.length,
-    expenseCount: expensesInPeriod.length,
+    expenseCount: operating.length,
+    gaCount: gaRows.length,
     byCategory,
+    byGaCategory,
   };
 }
 

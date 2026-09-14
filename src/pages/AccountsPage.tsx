@@ -47,9 +47,11 @@ import { fetchOrders, markStayFoodOrdersPaid, subscribeOrders, type FoodOrder } 
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABELS,
+  EXPENSE_KIND_LABELS,
   EXPENSE_PAYMENT_LABELS,
   EXPENSE_PAYMENT_METHODS,
   type ExpenseCategory,
+  type ExpenseKind,
   type ExpensePaymentMethod,
 } from "../types/expense";
 
@@ -57,6 +59,7 @@ type TabId = "overview" | "expenses" | "revenue";
 
 const emptyForm = () => ({
   title: "",
+  kind: "operating" as ExpenseKind,
   category: "supplies" as ExpenseCategory,
   amount: "",
   date: todayIsoDate(),
@@ -91,6 +94,7 @@ export function AccountsPage() {
   const [period, setPeriod] = useState<AccountsPeriod>("month");
   const [tab, setTab] = useState<TabId>("overview");
   const [categoryFilter, setCategoryFilter] = useState<"all" | ExpenseCategory>("all");
+  const [kindFilter, setKindFilter] = useState<"all" | ExpenseKind>("all");
   const [refreshing, setRefreshing] = useState(false);
 
   const [mode, setMode] = useState<"create" | "edit" | null>(null);
@@ -154,11 +158,15 @@ export function AccountsPage() {
   );
 
   const filteredExpenses = useMemo(() => {
-    if (categoryFilter === "all") return periodExpenses;
-    return periodExpenses.filter((e) => e.category === categoryFilter);
-  }, [periodExpenses, categoryFilter]);
+    return periodExpenses.filter((e) => {
+      if (kindFilter !== "all" && e.kind !== kindFilter) return false;
+      if (categoryFilter !== "all" && e.category !== categoryFilter) return false;
+      return true;
+    });
+  }, [periodExpenses, categoryFilter, kindFilter]);
 
   const maxCategory = snapshot.byCategory[0]?.amount || 0;
+  const maxGaCategory = snapshot.byGaCategory[0]?.amount || 0;
 
   async function onRefresh() {
     setRefreshing(true);
@@ -182,8 +190,8 @@ export function AccountsPage() {
     }
   }
 
-  function openCreate() {
-    setForm({ ...emptyForm(), recordedBy: staffName });
+  function openCreate(kind: ExpenseKind = "operating") {
+    setForm({ ...emptyForm(), kind, recordedBy: staffName });
     setFormError(null);
     setEditingId(null);
     setMode("create");
@@ -192,6 +200,7 @@ export function AccountsPage() {
   function openEdit(row: ExpenseRecord) {
     setForm({
       title: row.title,
+      kind: row.kind || "operating",
       category: row.category,
       amount: String(row.amount),
       date: row.date.slice(0, 10),
@@ -211,6 +220,7 @@ export function AccountsPage() {
     try {
       const payload = {
         title: form.title,
+        kind: form.kind,
         category: form.category,
         amount: Number(form.amount),
         date: form.date,
@@ -264,6 +274,10 @@ export function AccountsPage() {
         { header: "Date", value: (r) => r.date },
         { header: "Title", value: (r) => r.title },
         {
+          header: "Ledger",
+          value: (r) => EXPENSE_KIND_LABELS[r.kind] || r.kind,
+        },
+        {
           header: "Category",
           value: (r) => EXPENSE_CATEGORY_LABELS[r.category],
         },
@@ -314,9 +328,13 @@ export function AccountsPage() {
             <Button variant="secondary" className="w-full sm:w-auto" onClick={onExportExpenses}>
               {t.common.export}
             </Button>
-            <Button variant="gold" className="w-full sm:w-auto" onClick={openCreate}>
+            <Button variant="gold" className="w-full sm:w-auto" onClick={() => openCreate("operating")}>
               <Plus className="h-4 w-4" />
               {a.addExpense}
+            </Button>
+            <Button variant="secondary" className="w-full sm:w-auto" onClick={() => openCreate("ga")}>
+              <Plus className="h-4 w-4" />
+              {a.addGaExpense}
             </Button>
           </>
         }
@@ -335,7 +353,7 @@ export function AccountsPage() {
         ))}
       </div>
 
-      <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
           label={a.revenue}
           value={formatRs(snapshot.revenue, t.common.rs)}
@@ -345,6 +363,11 @@ export function AccountsPage() {
           label={a.expenditures}
           value={formatRs(snapshot.expenditures, t.common.rs)}
           hint={`${snapshot.expenseCount} ${a.entries}`}
+        />
+        <StatCard
+          label={a.gaExpenditures}
+          value={formatRs(snapshot.gaExpenditures, t.common.rs)}
+          hint={`${snapshot.gaCount} ${a.entries}`}
         />
         <StatCard
           label={a.profit}
@@ -436,7 +459,7 @@ export function AccountsPage() {
                 </span>
                 <span className="text-muted">
                   {" "}
-                  ({a.revenue} − {a.expenditures})
+                  ({a.revenue} − {a.expenditures} − {a.gaExpenditures})
                 </span>
               </p>
             </div>
@@ -486,7 +509,7 @@ export function AccountsPage() {
             </ul>
           </Card>
 
-          <Card className="lg:col-span-2">
+          <Card>
             <CardHeader title={a.expenseByCategory} />
             {snapshot.byCategory.length === 0 ? (
               <EmptyState message={`${a.noExpenses} ${a.noExpensesSub}`} />
@@ -518,11 +541,67 @@ export function AccountsPage() {
               </ul>
             )}
           </Card>
+
+          <Card>
+            <CardHeader title={a.gaByCategory} />
+            {snapshot.byGaCategory.length === 0 ? (
+              <EmptyState message={a.noGaExpenses} />
+            ) : (
+              <ul className="space-y-3">
+                {snapshot.byGaCategory.map((row) => {
+                  const pct = maxGaCategory
+                    ? Math.max(6, Math.round((row.amount / maxGaCategory) * 100))
+                    : 0;
+                  return (
+                    <li key={row.category}>
+                      <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+                        <span className="font-medium">
+                          {EXPENSE_CATEGORY_LABELS[row.category]}
+                        </span>
+                        <span className="tabular-nums text-muted">
+                          {formatRs(row.amount, t.common.rs)} · {row.count}
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-app">
+                        <div
+                          className="h-full rounded-full bg-[var(--accent)]"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
         </div>
       ) : null}
 
       {tab === "expenses" ? (
         <div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={kindFilter === "all" ? "gold" : "secondary"}
+              onClick={() => setKindFilter("all")}
+            >
+              {t.common.all}
+            </Button>
+            <Button
+              size="sm"
+              variant={kindFilter === "operating" ? "gold" : "secondary"}
+              onClick={() => setKindFilter("operating")}
+            >
+              {a.kindOperating}
+            </Button>
+            <Button
+              size="sm"
+              variant={kindFilter === "ga" ? "gold" : "secondary"}
+              onClick={() => setKindFilter("ga")}
+            >
+              {a.kindGa}
+            </Button>
+          </div>
           <div className="mb-3 flex flex-wrap gap-2">
             <Button
               size="sm"
@@ -557,7 +636,7 @@ export function AccountsPage() {
                   a.vendor,
                   t.common.actions,
                 ]}
-                colWidths={["12%", "22%", "14%", "12%", "12%", "14%", "14%"]}
+                colWidths={["12%", "20%", "18%", "12%", "12%", "12%", "14%"]}
               >
                 {filteredExpenses.map((row) => (
                   <Tr key={row.id}>
@@ -571,9 +650,14 @@ export function AccountsPage() {
                       ) : null}
                     </Td>
                     <Td>
-                      <Badge tone="gold">
-                        {EXPENSE_CATEGORY_LABELS[row.category]}
-                      </Badge>
+                      <div className="flex flex-wrap gap-1">
+                        <Badge tone={row.kind === "ga" ? "info" : "gold"}>
+                          {row.kind === "ga" ? a.kindGa : a.kindOperating}
+                        </Badge>
+                        <Badge tone="muted">
+                          {EXPENSE_CATEGORY_LABELS[row.category]}
+                        </Badge>
+                      </div>
                     </Td>
                     <Td className="font-semibold tabular-nums">
                       {formatRs(row.amount, t.common.rs)}
@@ -725,6 +809,11 @@ export function AccountsPage() {
                           <p className="mt-1 text-sm font-bold tabular-nums">
                             {formatRs(row.roomCharges || 0, t.common.rs)}
                           </p>
+                          {row.discountPercent > 0 ? (
+                            <p className="mt-0.5 text-[11px] font-normal text-muted">
+                              {row.discountPercent}% off
+                            </p>
+                          ) : null}
                         </div>
                         <div className="rounded-xl border border-app bg-elevated px-3 py-2.5">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -843,8 +932,16 @@ export function AccountsPage() {
 
       <Modal
         open={mode != null}
-        title={mode === "edit" ? a.editExpense : a.addExpense}
-        subtitle={a.expenseFormSub}
+        title={
+          mode === "edit"
+            ? form.kind === "ga"
+              ? a.editGaExpense
+              : a.editExpense
+            : form.kind === "ga"
+              ? a.addGaExpense
+              : a.addExpense
+        }
+        subtitle={form.kind === "ga" ? a.gaFormSub : a.expenseFormSub}
         onClose={() => !saving && setMode(null)}
         footer={
           <>

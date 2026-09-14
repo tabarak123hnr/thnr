@@ -55,6 +55,8 @@ const ALL_PERMISSIONS = [
   "accounts",
   "invoices",
   "employees",
+  "duties_roster",
+  "attendance",
   "reports",
   "user_management",
   "settings",

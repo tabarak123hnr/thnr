@@ -13,7 +13,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
-import { calcCheckoutBill, calcRoomBill } from "../lib/billing";
+import { calcCheckoutBill, calcRoomBill, clampDiscountPercent } from "../lib/billing";
 import type {
   CheckInCompanion,
   CheckInRecord,
@@ -48,16 +48,17 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
   const checkInAt = String(data.checkInAt ?? "");
   const checkOutAt = String(data.checkOutAt ?? "");
   const extraCharges = Number(data.extraCharges ?? 0);
+  const discountPercent = clampDiscountPercent(data.discountPercent);
   const computed =
     nightlyRate > 0 && checkInAt && checkOutAt
-      ? calcRoomBill(nightlyRate, checkInAt, checkOutAt, extraCharges)
+      ? calcRoomBill(nightlyRate, checkInAt, checkOutAt, extraCharges, discountPercent)
       : null;
 
   const paymentTiming =
     (data.paymentTiming as PaymentTiming) ||
     (data.paymentStatus === "paid" ? "paid_at_checkin" : "due_on_checkout");
 
-  const totalBill = Number(data.totalBill ?? computed?.totalBill ?? 0);
+  const totalBill = computed?.totalBill ?? Number(data.totalBill ?? 0);
   const storedPaid = Number(data.amountPaid ?? NaN);
   const split = resolvePaymentSplit(
     totalBill,
@@ -113,8 +114,12 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
       ? Math.max(0, Number(data.balanceDue))
       : split.balanceDue,
     nightlyRate: computed?.nightlyRate ?? nightlyRate,
+    discountPercent: computed?.discountPercent ?? discountPercent,
+    discountAmount: computed?.discountAmount ?? Number(data.discountAmount ?? 0),
+    discountedNightlyRate:
+      computed?.discountedNightlyRate ?? Number(data.discountedNightlyRate ?? nightlyRate),
     nights: Number(data.nights ?? computed?.nights ?? 0),
-    roomCharges: Number(data.roomCharges ?? computed?.roomCharges ?? 0),
+    roomCharges: computed?.roomCharges ?? Number(data.roomCharges ?? 0),
     extraCharges,
     totalBill,
     checkedOutAt: data.checkedOutAt ? String(data.checkedOutAt) : null,
@@ -192,6 +197,7 @@ export async function createCheckIn(input: {
   vehicleNumber?: string;
   nightlyRate: number;
   extraCharges?: number;
+  discountPercent?: number;
   paymentTiming: PaymentTiming;
   /** Cash collected at check-in (required when timing is partial) */
   amountPaidAtCheckIn?: number;
@@ -206,6 +212,7 @@ export async function createCheckIn(input: {
     input.checkInAt,
     input.checkOutAt,
     input.extraCharges ?? 0,
+    input.discountPercent ?? 0,
   );
   const split = resolvePaymentSplit(
     bill.totalBill,
@@ -253,6 +260,9 @@ export async function createCheckIn(input: {
     amountPaid: split.amountPaid,
     balanceDue: split.balanceDue,
     nightlyRate: bill.nightlyRate,
+    discountPercent: bill.discountPercent,
+    discountAmount: bill.discountAmount,
+    discountedNightlyRate: bill.discountedNightlyRate,
     nights: bill.nights,
     roomCharges: bill.roomCharges,
     extraCharges: bill.extraCharges,
@@ -312,6 +322,7 @@ export async function updateCheckIn(
     notes: string;
     nightlyRate: number;
     extraCharges?: number;
+    discountPercent?: number;
     cnicImageUrl?: string | null;
     cnicFrontImageUrl?: string | null;
     cnicBackImageUrl?: string | null;
@@ -333,6 +344,7 @@ export async function updateCheckIn(
     input.checkInAt,
     input.checkOutAt,
     input.extraCharges ?? 0,
+    input.discountPercent ?? 0,
   );
 
   const existing = await getDoc(doc(db, "checkIns", id));
@@ -376,6 +388,9 @@ export async function updateCheckIn(
       .toString()
       .trim(),
     nightlyRate: bill.nightlyRate,
+    discountPercent: bill.discountPercent,
+    discountAmount: bill.discountAmount,
+    discountedNightlyRate: bill.discountedNightlyRate,
     nights: bill.nights,
     roomCharges: bill.roomCharges,
     extraCharges: bill.extraCharges,
@@ -504,6 +519,7 @@ export async function checkoutGuest(
       plannedOut,
       actualOut,
       Number(data.extraCharges ?? 0),
+      clampDiscountPercent(data.discountPercent),
     );
 
     // Keep cash already collected; clamp if early leave lowered the bill
@@ -561,6 +577,9 @@ export async function checkoutGuest(
       roomCharges: bill.roomCharges,
       extraCharges: bill.extraCharges,
       totalBill: bill.totalBill,
+      discountPercent: bill.discountPercent,
+      discountAmount: bill.discountAmount,
+      discountedNightlyRate: bill.discountedNightlyRate,
       updatedAt: serverTimestamp(),
     });
 
@@ -716,7 +735,13 @@ export async function adjustCheckInExtraCharges(
   const checkOutAt = String(data.checkOutAt ?? "");
   const nightlyRate = Number(data.nightlyRate ?? 0);
   const nextExtra = Math.max(0, Number(data.extraCharges ?? 0) + delta);
-  const bill = calcRoomBill(nightlyRate, checkInAt, checkOutAt, nextExtra);
+  const bill = calcRoomBill(
+    nightlyRate,
+    checkInAt,
+    checkOutAt,
+    nextExtra,
+    clampDiscountPercent(data.discountPercent),
+  );
 
   const amountPaid = Math.max(0, Number(data.amountPaid ?? 0) + paidDelta);
   const balanceDue = Math.max(0, bill.totalBill - amountPaid);
@@ -737,6 +762,9 @@ export async function adjustCheckInExtraCharges(
     roomCharges: bill.roomCharges,
     extraCharges: bill.extraCharges,
     totalBill: bill.totalBill,
+    discountPercent: bill.discountPercent,
+    discountAmount: bill.discountAmount,
+    discountedNightlyRate: bill.discountedNightlyRate,
     amountPaid,
     balanceDue,
     paymentStatus,

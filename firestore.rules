@@ -97,6 +97,18 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Duty roster — signed-in staff assign tasks and supervisors
+    match /dutyRoster/{dutyId} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn();
+    }
+
+    // Attendance — signed-in staff clock employees in/out
+    match /attendance/{recordId} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn();
+    }
+
     // Housekeeping tasks — signed-in staff
     match /housekeepingTasks/{taskId} {
       allow read: if signedIn();

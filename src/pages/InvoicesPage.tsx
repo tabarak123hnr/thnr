@@ -317,6 +317,11 @@ export function InvoicesPage() {
                   <Td className="text-muted">{formatDate(inv.checkInAt)}</Td>
                   <Td className="font-semibold">
                     {formatRs(inv.totalBill, t.common.rs)}
+                    {inv.type === "room" && inv.discountPercent > 0 ? (
+                      <div className="text-[11px] font-normal text-muted">
+                        {inv.discountPercent}% off
+                      </div>
+                    ) : null}
                   </Td>
                   <Td>{formatRs(inv.amountPaid, t.common.rs)}</Td>
                   <Td>
