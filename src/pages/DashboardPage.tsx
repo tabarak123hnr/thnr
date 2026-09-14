@@ -11,9 +11,11 @@ import {
   buildOpsNotifications,
   formatNotificationAge,
 } from "../lib/buildNotifications";
+import { todayIsoDate } from "../lib/dutyPerformance";
 import { cn, formatAge, formatRs } from "../lib/utils";
 import { subscribeBookingRequests } from "../services/bookingRequests";
 import { subscribeCheckIns, type CheckInRecord } from "../services/checkIns";
+import { subscribeDuties, type DutyAssignment, type DutyStatus } from "../services/duties";
 import { subscribeHousekeepingTasks } from "../services/housekeeping";
 import { subscribeOrders, type FoodOrder } from "../services/orders";
 import { subscribeRooms, type HotelRoom } from "../services/rooms";
@@ -57,6 +59,30 @@ function formatShortWhen(iso: string) {
   });
 }
 
+const dutyStatusTone: Record<DutyStatus, "gold" | "info" | "success" | "danger" | "muted"> = {
+  scheduled: "gold",
+  in_progress: "info",
+  completed: "success",
+  missed: "danger",
+  cancelled: "muted",
+};
+
+const dutyStatusLabel: Record<DutyStatus, string> = {
+  scheduled: "Scheduled",
+  in_progress: "In progress",
+  completed: "Completed",
+  missed: "Missed",
+  cancelled: "Cancelled",
+};
+
+const dutyStatusOrder: Record<DutyStatus, number> = {
+  in_progress: 0,
+  scheduled: 1,
+  missed: 2,
+  completed: 3,
+  cancelled: 4,
+};
+
 export function DashboardPage() {
   const { t, language } = useApp();
 
@@ -65,6 +91,7 @@ export function DashboardPage() {
   const [orders, setOrders] = useState<FoodOrder[]>([]);
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
   const [tasks, setTasks] = useState<HousekeepingTask[]>([]);
+  const [duties, setDuties] = useState<DutyAssignment[]>([]);
   const [tick, setTick] = useState(() => Date.now());
 
   useEffect(() => {
@@ -73,12 +100,14 @@ export function DashboardPage() {
     const c = subscribeOrders(setOrders);
     const d = subscribeBookingRequests(setBookings);
     const e = subscribeHousekeepingTasks(setTasks);
+    const f = subscribeDuties(setDuties);
     return () => {
       a();
       b();
       c();
       d();
       e();
+      f();
     };
   }, []);
 
@@ -231,6 +260,19 @@ export function DashboardPage() {
       orderCount: ordersToday.length,
     };
   }, [orders, checkIns, dayStart]);
+
+  const todaysDuties = useMemo(() => {
+    const today = todayIsoDate();
+    return duties
+      .filter((d) => d.date === today && d.status !== "cancelled")
+      .sort((a, b) => {
+        const byStatus = dutyStatusOrder[a.status] - dutyStatusOrder[b.status];
+        if (byStatus !== 0) return byStatus;
+        const byName = (a.assigneeName || "zzz").localeCompare(b.assigneeName || "zzz");
+        if (byName !== 0) return byName;
+        return a.title.localeCompare(b.title);
+      });
+  }, [duties, tick]);
 
   const occPct =
     kpis.totalRooms > 0
@@ -398,6 +440,65 @@ export function DashboardPage() {
                 </li>
               ))}
             </ul>
+          )}
+        </Card>
+      </div>
+
+      <div className="mt-4">
+        <Card>
+          <CardHeader
+            title={t.liveDutyRoster}
+            badge={
+              <span className="flex items-center gap-2">
+                <Badge tone="info">{t.live}</Badge>
+                {todaysDuties.length ? (
+                  <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-accent-soft px-1.5 text-[11px] font-bold text-[var(--accent)]">
+                    {todaysDuties.length}
+                  </span>
+                ) : null}
+              </span>
+            }
+            action={
+              <Link
+                to="/duties-roster"
+                className="inline-flex items-center gap-1 text-sm font-semibold text-muted hover:text-app"
+              >
+                {t.viewAll}
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Link>
+            }
+          />
+          {todaysDuties.length === 0 ? (
+            <EmptyState message={t.noDutiesToday} />
+          ) : (
+            <div className="max-h-[420px] overflow-auto">
+              <Table
+                headers={[t.duty, t.assignee, t.shift, t.status]}
+                colWidths={["38%", "28%", "16%", "18%"]}
+              >
+                {todaysDuties.map((row) => (
+                  <Tr key={row.id}>
+                    <Td>
+                      <p className="font-semibold">{row.title}</p>
+                      <p className="mt-0.5 text-xs text-muted">{row.category}</p>
+                    </Td>
+                    <Td>
+                      {row.assigneeName ? (
+                        <span className="font-semibold">{row.assigneeName}</span>
+                      ) : (
+                        <span className="text-muted">{t.unassigned}</span>
+                      )}
+                    </Td>
+                    <Td className="text-muted">{row.shift}</Td>
+                    <Td>
+                      <Badge tone={dutyStatusTone[row.status]}>
+                        {dutyStatusLabel[row.status]}
+                      </Badge>
+                    </Td>
+                  </Tr>
+                ))}
+              </Table>
+            </div>
           )}
         </Card>
       </div>
