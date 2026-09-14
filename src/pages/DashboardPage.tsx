@@ -471,18 +471,19 @@ export function DashboardPage() {
           {todaysDuties.length === 0 ? (
             <EmptyState message={t.noDutiesToday} />
           ) : (
-            <div className="max-h-[420px] overflow-auto">
+            <div className="max-h-[420px] overflow-y-auto overflow-x-hidden">
               <Table
+                scrollX={false}
                 headers={[t.duty, t.assignee, t.shift, t.status]}
                 colWidths={["38%", "28%", "16%", "18%"]}
               >
                 {todaysDuties.map((row) => (
                   <Tr key={row.id}>
-                    <Td>
-                      <p className="font-semibold">{row.title}</p>
+                    <Td className="min-w-0">
+                      <p className="break-words font-semibold">{row.title}</p>
                       <p className="mt-0.5 text-xs text-muted">{row.category}</p>
                     </Td>
-                    <Td>
+                    <Td className="min-w-0 break-words">
                       {row.assigneeName ? (
                         <span className="font-semibold">{row.assigneeName}</span>
                       ) : (
