@@ -149,7 +149,9 @@ export function buildGuestReportBwHtml(data: GuestReportExportData): string {
               <p class="muted">${fmtWhen(row.checkInAt)} → ${fmtWhen(String(row.checkedOutAt || row.checkOutAt))} · ${row.nights || 0} night(s)</p>
               <div class="grid">
                 <div class="cell"><p class="label">Payment plan</p><p class="value">${esc(paymentPlanLabel(row.paymentTiming))}</p></div>
-                <div class="cell"><p class="label">Room / extras</p><p class="value">${esc(formatRs(row.roomCharges || 0, rs))} + ${esc(formatRs(row.extraCharges || 0, rs))}</p></div>
+                <div class="cell"><p class="label">Room / extras</p><p class="value">${esc(formatRs(row.roomCharges || 0, rs))} + ${esc(formatRs(row.extraCharges || 0, rs))}${
+                  row.discountPercent > 0 ? ` · ${row.discountPercent}% off` : ""
+                }</p></div>
                 <div class="cell"><p class="label">Paid</p><p class="value">${esc(formatRs(paid, rs))}</p></div>
                 <div class="cell"><p class="label">Balance due</p><p class="value">${esc(formatRs(due, rs))}</p></div>
               </div>

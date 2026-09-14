@@ -10,7 +10,7 @@ import { Field, Input, PageHeader, TextArea } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
-import { calcCheckoutBill, calcRoomBill } from "../lib/billing";
+import { calcCheckoutBill, calcRoomBill, clampDiscountPercent } from "../lib/billing";
 import { uploadImageToCloudinary } from "../lib/cloudinary";
 import {
   isGuestEmailConfigured,
@@ -147,6 +147,12 @@ function emptyForm() {
 function BillSummary({
   nights,
   nightlyRate,
+  discountedNightlyRate,
+  discountPercent,
+  discountAmount,
+  roomChargesBefore,
+  roomCharges,
+  extraCharges,
   totalBill,
   rs,
   paymentTiming,
@@ -154,6 +160,12 @@ function BillSummary({
 }: {
   nights: number;
   nightlyRate: number;
+  discountedNightlyRate: number;
+  discountPercent: number;
+  discountAmount: number;
+  roomChargesBefore: number;
+  roomCharges: number;
+  extraCharges: number;
   totalBill: number;
   rs: string;
   paymentTiming: PaymentTiming;
@@ -166,13 +178,41 @@ function BillSummary({
         ? Math.min(totalBill, Math.max(0, amountPaidAtCheckIn))
         : 0;
   const due = Math.max(0, totalBill - paid);
+  const hasDiscount = discountPercent > 0 && discountAmount > 0;
 
   return (
     <div className="rounded-2xl border border-[color-mix(in_oklab,var(--accent)_40%,var(--border))] bg-accent-soft px-4 py-3">
       <p className="text-xs font-bold uppercase tracking-wide text-[var(--accent)]">Room bill</p>
       <p className="mt-1 text-sm text-muted">
         {nights} night{nights === 1 ? "" : "s"} × {formatRs(nightlyRate, rs)}
+        {hasDiscount ? ` → ${formatRs(discountedNightlyRate, rs)} / night` : ""}
       </p>
+      {hasDiscount ? (
+        <div className="mt-2 space-y-0.5 text-sm">
+          <p className="flex justify-between gap-3">
+            <span className="text-muted">Room subtotal</span>
+            <span className="font-semibold">
+              {formatRs(roomChargesBefore || roomCharges + discountAmount, rs)}
+            </span>
+          </p>
+          <p className="flex justify-between gap-3">
+            <span className="text-muted">Discount ({discountPercent}%)</span>
+            <span className="font-semibold">−{formatRs(discountAmount, rs)}</span>
+          </p>
+          <p className="flex justify-between gap-3">
+            <span className="text-muted">Room after discount</span>
+            <span className="font-semibold">{formatRs(roomCharges, rs)}</span>
+          </p>
+          {extraCharges > 0 ? (
+            <p className="flex justify-between gap-3">
+              <span className="text-muted">Extras</span>
+              <span className="font-semibold">{formatRs(extraCharges, rs)}</span>
+            </p>
+          ) : null}
+        </div>
+      ) : extraCharges > 0 ? (
+        <p className="mt-1 text-sm text-muted">Extras {formatRs(extraCharges, rs)}</p>
+      ) : null}
       <p className="mt-1 text-xl font-extrabold text-[var(--accent)]">
         {formatRs(totalBill, rs)}
       </p>
@@ -236,6 +276,7 @@ export function CheckInPage() {
   const [existingCnicBackUrl, setExistingCnicBackUrl] = useState<string | null>(null);
   const [nightlyRate, setNightlyRate] = useState(0);
   const [extraCharges, setExtraCharges] = useState(0);
+  const [discountPercent, setDiscountPercent] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -275,8 +316,19 @@ export function CheckInPage() {
 
   const liveBill = useMemo(() => {
     const rate = nightlyRate || selectedRoom?.rate || 0;
+    const pct = clampDiscountPercent(discountPercent);
     if (!form.checkInAt || !form.checkOutAt || !rate) {
-      return { nights: 0, nightlyRate: rate, roomCharges: 0, extraCharges, totalBill: 0 };
+      return {
+        nights: 0,
+        nightlyRate: rate,
+        discountedNightlyRate: rate,
+        discountPercent: pct,
+        discountAmount: 0,
+        roomChargesBefore: 0,
+        roomCharges: 0,
+        extraCharges,
+        totalBill: extraCharges,
+      };
     }
     try {
       return calcRoomBill(
@@ -284,11 +336,12 @@ export function CheckInPage() {
         new Date(form.checkInAt).toISOString(),
         new Date(form.checkOutAt).toISOString(),
         extraCharges,
+        pct,
       );
     } catch {
-      return { nights: 1, nightlyRate: rate, roomCharges: rate, extraCharges, totalBill: rate + extraCharges };
+      return calcRoomBill(rate, new Date(), new Date(Date.now() + 86_400_000), extraCharges, pct);
     }
-  }, [form.checkInAt, form.checkOutAt, nightlyRate, selectedRoom?.rate, extraCharges]);
+  }, [form.checkInAt, form.checkOutAt, nightlyRate, selectedRoom?.rate, extraCharges, discountPercent]);
 
   const partySize = Math.max(1, Number(form.adults || 1) + Number(form.children || 0));
   const showCompanions = partySize > 1;
@@ -311,6 +364,7 @@ export function CheckInPage() {
     setCompanions([]);
     setNightlyRate(0);
     setExtraCharges(0);
+    setDiscountPercent("");
     setFormError(null);
     setEditingId(null);
     setLockedRoomId(null);
@@ -354,6 +408,7 @@ export function CheckInPage() {
     setCompanions([]);
     setNightlyRate(room.rate);
     setExtraCharges(0);
+    setDiscountPercent("");
     setFormError(null);
     setEditingId(null);
     setLockedRoomId(room.id);
@@ -406,6 +461,7 @@ export function CheckInPage() {
     );
     setNightlyRate(row.nightlyRate || rooms.find((r) => r.id === row.roomId)?.rate || 0);
     setExtraCharges(row.extraCharges || 0);
+    setDiscountPercent(row.discountPercent ? String(row.discountPercent) : "");
     setExistingCnicFrontUrl(row.cnicFrontImageUrl || row.cnicImageUrl);
     setExistingCnicBackUrl(row.cnicBackImageUrl);
     setFormError(null);
@@ -454,6 +510,7 @@ export function CheckInPage() {
       pendingEdit.plannedCheckOutAt || pendingEdit.checkOutAt,
       new Date().toISOString(),
       pendingEdit.extraCharges || 0,
+      pendingEdit.discountPercent || 0,
     );
   }, [pendingEdit, secureAction]);
 
@@ -703,6 +760,7 @@ export function CheckInPage() {
           vehicleNumber: form.vehicleNumber,
           nightlyRate: rate,
           extraCharges,
+          discountPercent: clampDiscountPercent(discountPercent),
           cnicFrontImageUrl: cnicFrontUrl ?? null,
           cnicBackImageUrl: cnicBackUrl ?? null,
           cnicImageUrl: cnicFrontUrl ?? null,
@@ -734,6 +792,7 @@ export function CheckInPage() {
           vehicleNumber: form.vehicleNumber,
           nightlyRate: rate,
           extraCharges,
+          discountPercent: clampDiscountPercent(discountPercent),
           paymentTiming: form.paymentTiming,
           amountPaidAtCheckIn: paidNow,
         });
@@ -756,6 +815,9 @@ export function CheckInPage() {
             checkOutAt,
             nights: liveBill.nights,
             nightlyRate: rate,
+            discountedNightlyRate: liveBill.discountedNightlyRate,
+            discountPercent: liveBill.discountPercent,
+            discountAmount: liveBill.discountAmount,
             totalBill: liveBill.totalBill,
             amountPaid: splitPaid,
             balanceDue: splitDue,
@@ -886,6 +948,9 @@ export function CheckInPage() {
                       <span className="text-xs text-muted">
                         {paymentSplitLine(row, t.common.rs)}
                       </span>
+                    ) : null}
+                    {row.discountPercent > 0 ? (
+                      <Badge tone="gold">{row.discountPercent}% off</Badge>
                     ) : null}
                     {row.cnicFrontImageUrl || row.cnicImageUrl || row.cnicBackImageUrl ? (
                       <Badge tone="info">CNIC on file</Badge>
@@ -1039,6 +1104,16 @@ export function CheckInPage() {
             <BillSummary
               nights={viewRow.nights || stayFallbackNights(viewRow)}
               nightlyRate={viewRow.nightlyRate}
+              discountedNightlyRate={
+                viewRow.discountedNightlyRate || viewRow.nightlyRate
+              }
+              discountPercent={viewRow.discountPercent || 0}
+              discountAmount={viewRow.discountAmount || 0}
+              roomChargesBefore={
+                viewRow.roomCharges + (viewRow.discountAmount || 0)
+              }
+              roomCharges={viewRow.roomCharges}
+              extraCharges={viewRow.extraCharges || 0}
               totalBill={viewRow.totalBill}
               rs={t.common.rs}
               paymentTiming={viewRow.paymentTiming}
@@ -1200,6 +1275,13 @@ export function CheckInPage() {
                   </span>
                 </p>
               )}
+              {checkoutPreview.discountPercent > 0 ? (
+                <p className="mt-1 text-xs text-muted">
+                  Room discount {checkoutPreview.discountPercent}% (
+                  −{formatRs(checkoutPreview.discountAmount, t.common.rs)}) is
+                  included.
+                </p>
+              ) : null}
               <p className="mt-2 text-xs text-muted">
                 Room will become available and marked dirty for housekeeping.
               </p>
@@ -1411,6 +1493,20 @@ export function CheckInPage() {
                   onChange={(e) => setForm((p) => ({ ...p, checkOutAt: e.target.value }))}
                 />
               </Field>
+              <Field label="Room discount (%)" className="sm:col-span-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={discountPercent}
+                  onChange={(e) => setDiscountPercent(e.target.value)}
+                  placeholder="0"
+                />
+                <p className="mt-1 text-xs text-muted">
+                  Off the room rate only — food extras stay at full price.
+                </p>
+              </Field>
               <SelectField label="Room payment" className="sm:col-span-2">
                 <FancySelect
                   value={form.paymentTiming}
@@ -1454,6 +1550,12 @@ export function CheckInPage() {
             <BillSummary
               nights={liveBill.nights}
               nightlyRate={liveBill.nightlyRate}
+              discountedNightlyRate={liveBill.discountedNightlyRate}
+              discountPercent={liveBill.discountPercent}
+              discountAmount={liveBill.discountAmount}
+              roomChargesBefore={liveBill.roomChargesBefore}
+              roomCharges={liveBill.roomCharges}
+              extraCharges={liveBill.extraCharges}
               totalBill={liveBill.totalBill}
               rs={t.common.rs}
               paymentTiming={form.paymentTiming}

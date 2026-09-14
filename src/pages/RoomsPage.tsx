@@ -228,6 +228,7 @@ export function RoomsPage() {
       activeCheckIn.plannedCheckOutAt || activeCheckIn.checkOutAt,
       new Date().toISOString(),
       activeCheckIn.extraCharges || 0,
+      activeCheckIn.discountPercent || 0,
     );
   }, [activeCheckIn]);
 
@@ -873,6 +874,13 @@ export function RoomsPage() {
                   {formatRs(checkoutPreview.totalBill, t.common.rs)}
                 </p>
               )}
+              {checkoutPreview.discountPercent > 0 ? (
+                <p className="mt-1 text-xs text-muted">
+                  Room discount {checkoutPreview.discountPercent}% (
+                  −{formatRs(checkoutPreview.discountAmount, t.common.rs)}) is
+                  included.
+                </p>
+              ) : null}
               {activeCheckIn ? (
                 <div className="mt-2 space-y-0.5 border-t border-app pt-2 text-xs">
                   <p className="flex justify-between gap-2">

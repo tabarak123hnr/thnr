@@ -1,3 +1,13 @@
+/** Operating vs general & administrative ledgers. */
+export const EXPENSE_KINDS = ["operating", "ga"] as const;
+
+export type ExpenseKind = (typeof EXPENSE_KINDS)[number];
+
+export const EXPENSE_KIND_LABELS: Record<ExpenseKind, string> = {
+  operating: "Expense",
+  ga: "General & administrative",
+};
+
 /** Operating expense / expenditure categories for hotel & restaurant. */
 export const EXPENSE_CATEGORIES = [
   "supplies",
@@ -8,7 +18,8 @@ export const EXPENSE_CATEGORIES = [
   "laundry",
   "transport",
   "marketing",
-  "rent",
+  "rent_oblige_travel",
+  "equipments",
   "miscellaneous",
 ] as const;
 
@@ -26,6 +37,7 @@ export type ExpensePaymentMethod = (typeof EXPENSE_PAYMENT_METHODS)[number];
 export interface ExpenseRecord {
   id: string;
   title: string;
+  kind: ExpenseKind;
   category: ExpenseCategory;
   amount: number;
   /** ISO date (YYYY-MM-DD) the expense belongs to */
@@ -48,7 +60,8 @@ export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   laundry: "Laundry",
   transport: "Transport",
   marketing: "Marketing",
-  rent: "Rent",
+  rent_oblige_travel: "Rent / Oblige travel",
+  equipments: "Equipments",
   miscellaneous: "Miscellaneous",
 };
 

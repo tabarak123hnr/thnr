@@ -47,6 +47,9 @@ export type GuestCheckInEmailPayload = {
   checkOutAt: string;
   nights: number;
   nightlyRate: number;
+  discountedNightlyRate?: number;
+  discountPercent?: number;
+  discountAmount?: number;
   totalBill: number;
   amountPaid: number;
   balanceDue: number;
@@ -69,6 +72,21 @@ export function buildGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
       ? `Payment: ${paymentStatusLabel(payload.paymentStatus)} — Paid ${formatRs(payload.amountPaid, rs)}, Remaining ${formatRs(payload.balanceDue, rs)}`
       : `Payment: ${paymentStatusLabel(payload.paymentStatus)} (${paymentPlanLabel(payload.paymentTiming)}) — Total ${formatRs(payload.totalBill, rs)}`;
 
+  const discountPct = payload.discountPercent || 0;
+  const discountedRate =
+    payload.discountedNightlyRate ??
+    (discountPct > 0
+      ? Math.round(payload.nightlyRate * (1 - discountPct / 100) * 100) / 100
+      : payload.nightlyRate);
+  const rateLine =
+    discountPct > 0
+      ? `Nightly rate: ${formatRs(payload.nightlyRate, rs)} · ${discountPct}% off → ${formatRs(discountedRate, rs)}`
+      : `Nightly rate: ${formatRs(payload.nightlyRate, rs)}`;
+  const discountLine =
+    discountPct > 0 && (payload.discountAmount || 0) > 0
+      ? `Room discount: ${discountPct}% (−${formatRs(payload.discountAmount || 0, rs)})`
+      : "";
+
   const subject = `${hotelName} — Check-in confirmation · Room ${payload.roomNumber}`;
 
   const text = [
@@ -81,7 +99,8 @@ export function buildGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
     `Check-out: ${formatWhen(payload.checkOutAt)}`,
     `Nights: ${payload.nights}`,
     `Guests: ${payload.adults} adult(s), ${payload.children} child(ren)`,
-    `Nightly rate: ${formatRs(payload.nightlyRate, rs)}`,
+    rateLine,
+    discountLine,
     `Total bill: ${formatRs(payload.totalBill, rs)}`,
     paymentLine,
     payload.phone ? `Phone on file: ${payload.phone}` : "",
@@ -100,7 +119,10 @@ export function buildGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
   const paidLabel = formatRs(payload.amountPaid, rs);
   const dueLabel = formatRs(payload.balanceDue, rs);
   const totalLabel = formatRs(payload.totalBill, rs);
-  const rateLabel = formatRs(payload.nightlyRate, rs);
+  const rateLabel =
+    discountPct > 0
+      ? `${formatRs(payload.nightlyRate, rs)} · ${discountPct}% off → ${formatRs(discountedRate, rs)}`
+      : formatRs(payload.nightlyRate, rs);
   const statusText = paymentStatusLabel(payload.paymentStatus);
   const planText = paymentPlanLabel(payload.paymentTiming);
   const dueColor = payload.balanceDue > 0 ? "#c0392b" : "#1a7f4b";
@@ -194,7 +216,20 @@ export function buildGuestCheckInEmail(payload: GuestCheckInEmailPayload) {
                 ${stackField("Check-out", formatWhen(payload.checkOutAt))}
                 ${stackField("Nights", String(payload.nights))}
                 ${stackField("Guests", `${payload.adults} adult(s), ${payload.children} child(ren)`)}
-                ${stackField("Nightly rate", rateLabel, !payload.phone && !payload.cnic)}
+                ${stackField("Nightly rate", rateLabel, discountPct <= 0 && !payload.phone && !payload.cnic)}
+                ${
+                  discountPct > 0
+                    ? stackField(
+                        "Room discount",
+                        `${discountPct}% off${
+                          payload.discountAmount
+                            ? ` (−${formatRs(payload.discountAmount, rs)})`
+                            : ""
+                        }`,
+                        !payload.phone && !payload.cnic,
+                      )
+                    : ""
+                }
                 ${payload.phone ? stackField("Phone", payload.phone, !payload.cnic) : ""}
                 ${payload.cnic ? stackField("CNIC", payload.cnic, true) : ""}
               </table>
@@ -361,6 +396,9 @@ export function guestEmailPayloadFromCheckIn(
     | "checkOutAt"
     | "nights"
     | "nightlyRate"
+    | "discountedNightlyRate"
+    | "discountPercent"
+    | "discountAmount"
     | "totalBill"
     | "amountPaid"
     | "balanceDue"
@@ -383,6 +421,9 @@ export function guestEmailPayloadFromCheckIn(
     checkOutAt: row.checkOutAt,
     nights: row.nights,
     nightlyRate: row.nightlyRate,
+    discountedNightlyRate: row.discountedNightlyRate,
+    discountPercent: row.discountPercent,
+    discountAmount: row.discountAmount,
     totalBill: row.totalBill,
     amountPaid: resolveAmountPaid(row),
     balanceDue: resolveBalanceDue(row),

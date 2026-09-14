@@ -34,6 +34,10 @@ export interface GuestInvoice {
   checkOutAt: string;
   nights: number;
   nightlyRate: number;
+  discountedNightlyRate: number;
+  discountPercent: number;
+  discountAmount: number;
+  roomChargesBefore: number;
   roomCharges: number;
   foodLines: InvoiceFoodLine[];
   foodTotal: number;

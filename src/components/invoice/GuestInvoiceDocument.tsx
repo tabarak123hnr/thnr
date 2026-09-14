@@ -203,14 +203,33 @@ export const GuestInvoiceDocument = forwardRef<
                     <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
                       {invoice.nights} night{invoice.nights === 1 ? "" : "s"} @{" "}
                       {fmtMoney(invoice.nightlyRate, rs)}
+                      {invoice.discountPercent > 0
+                        ? ` · ${invoice.discountPercent}% off`
+                        : ""}
                     </span>
                   </td>
                   <td style={tdCenter}>{invoice.nights}</td>
                   <td style={tdRight}>{fmtMoney(invoice.nightlyRate, rs)}</td>
                   <td style={{ ...tdRight, fontWeight: 700 }}>
-                    {fmtMoney(invoice.roomCharges, rs)}
+                    {fmtMoney(invoice.roomChargesBefore || invoice.roomCharges, rs)}
                   </td>
                 </tr>
+                {invoice.discountPercent > 0 && invoice.discountAmount > 0 ? (
+                  <tr>
+                    <td style={tdLeft}>
+                      Discount
+                      <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
+                        {invoice.discountPercent}% off room ·{" "}
+                        {fmtMoney(invoice.discountedNightlyRate, rs)} / night
+                      </span>
+                    </td>
+                    <td style={tdCenter}>1</td>
+                    <td style={tdRight}>−{fmtMoney(invoice.discountAmount, rs)}</td>
+                    <td style={{ ...tdRight, fontWeight: 700 }}>
+                      −{fmtMoney(invoice.discountAmount, rs)}
+                    </td>
+                  </tr>
+                ) : null}
                 {invoice.otherExtras > 0 ? (
                   <tr>
                     <td style={tdLeft}>Extras / miscellaneous</td>
@@ -254,7 +273,21 @@ export const GuestInvoiceDocument = forwardRef<
             {!isFood ? (
               <>
                 <div style={totalRow}>
-                  <span style={{ color: MUTED }}>Subtotal (room)</span>
+                  <span style={{ color: MUTED }}>Room subtotal</span>
+                  <span>
+                    {fmtMoney(invoice.roomChargesBefore || invoice.roomCharges, rs)}
+                  </span>
+                </div>
+                {invoice.discountPercent > 0 && invoice.discountAmount > 0 ? (
+                  <div style={totalRow}>
+                    <span style={{ color: MUTED }}>
+                      Discount ({invoice.discountPercent}%)
+                    </span>
+                    <span>−{fmtMoney(invoice.discountAmount, rs)}</span>
+                  </div>
+                ) : null}
+                <div style={totalRow}>
+                  <span style={{ color: MUTED }}>Room total</span>
                   <span>{fmtMoney(invoice.roomCharges, rs)}</span>
                 </div>
                 {invoice.otherExtras > 0 ? (
@@ -307,12 +340,22 @@ export const GuestInvoiceDocument = forwardRef<
         >
           <div>
             <p style={footerTitle}>Terms &amp; conditions</p>
-            <p style={footerBody}>
-              {isFood
-                ? "This is a computer-generated restaurant invoice. Food charges are billed separately from the room folio."
-                : "This is a computer-generated room invoice. Accommodation is billed separately from restaurant / room-service invoices."}
-              {invoice.notes && !isFood ? ` Notes: ${invoice.notes}` : ""}
-            </p>
+            <ul
+              style={{
+                ...footerBody,
+                padding: 0,
+                paddingLeft: 16,
+                listStyleType: "disc",
+              }}
+            >
+              <li>Extra mattress: Rs 2,000 per day</li>
+              <li>Mandatory check-in: 2:00 PM</li>
+              <li>Mandatory check-out: 11:00 AM</li>
+              <li>
+                Late check-out fine: Rs 1,500 per hour; after 3 hours, full day
+                rent
+              </li>
+            </ul>
           </div>
           <div>
             <p style={footerTitle}>Payment information</p>

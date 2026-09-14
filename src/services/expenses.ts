@@ -14,15 +14,28 @@ import {
 import { auth, db } from "../config/firebase";
 import type {
   ExpenseCategory,
+  ExpenseKind,
   ExpensePaymentMethod,
   ExpenseRecord,
 } from "../types/expense";
-import { EXPENSE_CATEGORIES, EXPENSE_PAYMENT_METHODS } from "../types/expense";
+import {
+  EXPENSE_CATEGORIES,
+  EXPENSE_KINDS,
+  EXPENSE_PAYMENT_METHODS,
+} from "../types/expense";
 
-export type { ExpenseRecord, ExpenseCategory, ExpensePaymentMethod };
+export type { ExpenseRecord, ExpenseCategory, ExpenseKind, ExpensePaymentMethod };
+
+function asKind(value: unknown): ExpenseKind {
+  const s = String(value ?? "");
+  return (EXPENSE_KINDS as readonly string[]).includes(s)
+    ? (s as ExpenseKind)
+    : "operating";
+}
 
 function asCategory(value: unknown): ExpenseCategory {
   const s = String(value ?? "");
+  if (s === "rent") return "rent_oblige_travel";
   return (EXPENSE_CATEGORIES as readonly string[]).includes(s)
     ? (s as ExpenseCategory)
     : "miscellaneous";
@@ -39,6 +52,7 @@ function mapExpense(id: string, data: Record<string, unknown>): ExpenseRecord {
   return {
     id,
     title: String(data.title ?? ""),
+    kind: asKind(data.kind),
     category: asCategory(data.category),
     amount: Math.max(0, Number(data.amount) || 0),
     date: String(data.date ?? "").slice(0, 10),
@@ -73,6 +87,7 @@ export async function fetchExpenses(): Promise<ExpenseRecord[]> {
 
 export type ExpenseInput = {
   title: string;
+  kind?: ExpenseKind;
   category: ExpenseCategory;
   amount: number;
   date: string;
@@ -91,6 +106,7 @@ export async function createExpense(input: ExpenseInput) {
 
   const ref = await addDoc(collection(db, "expenses"), {
     title: input.title.trim(),
+    kind: input.kind ?? "operating",
     category: input.category,
     amount,
     date: input.date.slice(0, 10),
@@ -114,6 +130,7 @@ export async function updateExpense(id: string, input: ExpenseInput) {
 
   await updateDoc(doc(db, "expenses", id), {
     title: input.title.trim(),
+    kind: input.kind ?? "operating",
     category: input.category,
     amount,
     date: input.date.slice(0, 10),

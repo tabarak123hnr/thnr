@@ -26,20 +26,12 @@ function foodInvoiceNumber(checkInId: string, roomNumber: string, checkInAt: str
 }
 
 function resolveBill(row: CheckInRecord) {
-  if (row.totalBill > 0 && row.nightlyRate >= 0) {
-    return {
-      nights: row.nights || 1,
-      nightlyRate: row.nightlyRate,
-      roomCharges: row.roomCharges || row.nightlyRate * (row.nights || 1),
-      extraCharges: row.extraCharges || 0,
-      totalBill: row.totalBill,
-    };
-  }
   return calcRoomBill(
     row.nightlyRate,
     row.checkInAt,
     row.checkOutAt,
     row.extraCharges || 0,
+    row.discountPercent || 0,
   );
 }
 
@@ -141,6 +133,10 @@ export function buildRoomInvoice(
     number: roomInvoiceNumber(row.id, row.roomNumber, row.checkInAt),
     nights: bill.nights,
     nightlyRate: bill.nightlyRate,
+    discountedNightlyRate: bill.discountedNightlyRate,
+    discountPercent: bill.discountPercent,
+    discountAmount: bill.discountAmount,
+    roomChargesBefore: bill.roomChargesBefore,
     roomCharges: bill.roomCharges,
     foodLines: [],
     foodTotal: 0,
@@ -186,6 +182,10 @@ export function buildFoodInvoice(
     number: foodInvoiceNumber(row.id, row.roomNumber, row.checkInAt),
     nights: bill.nights,
     nightlyRate: bill.nightlyRate,
+    discountedNightlyRate: bill.discountedNightlyRate,
+    discountPercent: 0,
+    discountAmount: 0,
+    roomChargesBefore: 0,
     roomCharges: 0,
     foodLines,
     foodTotal,

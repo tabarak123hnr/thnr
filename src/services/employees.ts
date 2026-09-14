@@ -32,6 +32,10 @@ function mapEmployee(id: string, data: Record<string, unknown>): Employee {
     designation,
     shift: (data.shift as EmployeeShift) || "Morning",
     status: (data.status as EmployeeStatus) || "active",
+    address: String(data.address ?? ""),
+    backgroundInformation: String(
+      data.backgroundInformation ?? data.background ?? "",
+    ),
     notes: String(data.notes ?? ""),
     cnicFrontImageUrl: data.cnicFrontImageUrl ? String(data.cnicFrontImageUrl) : null,
     cnicBackImageUrl: data.cnicBackImageUrl ? String(data.cnicBackImageUrl) : null,
@@ -61,6 +65,8 @@ export async function createEmployee(input: {
   designation: string;
   shift: EmployeeShift;
   status: EmployeeStatus;
+  address: string;
+  backgroundInformation: string;
   notes: string;
   cnicFrontImageUrl?: string | null;
   cnicBackImageUrl?: string | null;
@@ -73,6 +79,8 @@ export async function createEmployee(input: {
     designation: input.designation.trim(),
     shift: input.shift,
     status: input.status,
+    address: input.address.trim(),
+    backgroundInformation: input.backgroundInformation.trim(),
     notes: input.notes.trim(),
     cnicFrontImageUrl: input.cnicFrontImageUrl ?? null,
     cnicBackImageUrl: input.cnicBackImageUrl ?? null,
@@ -92,6 +100,8 @@ export async function updateEmployee(
     designation: string;
     shift: EmployeeShift;
     status: EmployeeStatus;
+    address: string;
+    backgroundInformation: string;
     notes: string;
     cnicFrontImageUrl?: string | null;
     cnicBackImageUrl?: string | null;
@@ -105,6 +115,8 @@ export async function updateEmployee(
     designation: input.designation.trim(),
     shift: input.shift,
     status: input.status,
+    address: input.address.trim(),
+    backgroundInformation: input.backgroundInformation.trim(),
     notes: input.notes.trim(),
     updatedAt: serverTimestamp(),
   };

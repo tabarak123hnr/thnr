@@ -7,8 +7,10 @@ import { ToastProvider } from "./context/ToastProvider";
 import { AccountsPage } from "./pages/AccountsPage";
 import { BookingRequestsPage } from "./pages/BookingRequestsPage";
 import { CheckInPage } from "./pages/CheckInPage";
+import { AttendancePage } from "./pages/AttendancePage";
 import { CounterPage } from "./pages/CounterPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DutiesRosterPage } from "./pages/DutiesRosterPage";
 import { EmployeesPage } from "./pages/EmployeesPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { GuestFeedbackPage } from "./pages/GuestFeedbackPage";
@@ -51,6 +53,8 @@ export default function App() {
                 <Route path="accounts" element={<AccountsPage />} />
                 <Route path="invoices" element={<InvoicesPage />} />
                 <Route path="employees" element={<EmployeesPage />} />
+                <Route path="duties-roster" element={<DutiesRosterPage />} />
+                <Route path="attendance" element={<AttendancePage />} />
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="user-management" element={<UserManagementPage />} />
                 <Route path="settings" element={<SettingsPage />} />
