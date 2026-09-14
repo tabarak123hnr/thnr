@@ -2,8 +2,8 @@ import type { CheckInRecord, PaymentStatus, PaymentTiming } from "./checkIn";
 
 export type InvoiceListStatus = "paid" | "unpaid" | "partial";
 
-/** Separate documents — never combined on one folio. */
-export type InvoiceType = "room" | "restaurant";
+/** Room, food, or one combined folio for the stay. */
+export type InvoiceType = "room" | "restaurant" | "overall";
 
 export interface InvoiceFoodLine {
   orderToken: string;
@@ -18,7 +18,7 @@ export interface InvoiceFoodLine {
 }
 
 export interface GuestInvoice {
-  /** Unique folio id: `{checkInId}-room` or `{checkInId}-food` */
+  /** Unique folio id: `{checkInId}-room`, `{checkInId}-food`, or `{checkInId}-overall` */
   id: string;
   /** Parent stay id */
   checkInId: string;

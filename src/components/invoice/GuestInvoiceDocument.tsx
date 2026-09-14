@@ -44,6 +44,9 @@ export const GuestInvoiceDocument = forwardRef<
   { invoice: GuestInvoice; hotelName: string; rs?: string }
 >(function GuestInvoiceDocument({ invoice, hotelName, rs = "Rs" }, ref) {
   const isFood = invoice.type === "restaurant";
+  const isOverall = invoice.type === "overall";
+  const showRoom = invoice.type === "room" || isOverall;
+  const showFood = isFood || isOverall;
   const status = invoiceListStatus(invoice);
   const statusLabel =
     status === "paid" ? "Paid" : status === "partial" ? "Partial" : "Due";
@@ -76,7 +79,11 @@ export const GuestInvoiceDocument = forwardRef<
         >
           <div style={{ minWidth: 0, flex: 1 }}>
             <p style={eyebrow}>
-              {isFood ? "Restaurant invoice" : "Room invoice"}
+              {isOverall
+                ? "Overall invoice"
+                : isFood
+                  ? "Restaurant invoice"
+                  : "Room invoice"}
             </p>
             <h1
               style={{
@@ -93,9 +100,11 @@ export const GuestInvoiceDocument = forwardRef<
             <p style={{ margin: "10px 0 0", fontSize: 12, color: MUTED, lineHeight: 1.55 }}>
               Tabarak Hotel &amp; Restaurant
               <br />
-              {isFood
-                ? "Food / room service bill (separate from room folio)"
-                : "Accommodation folio (separate from food bills)"}
+              {isOverall
+                ? "Combined room and food bill for this stay"
+                : isFood
+                  ? "Food / room service bill (separate from room folio)"
+                  : "Accommodation folio (separate from food bills)"}
             </p>
           </div>
 
@@ -195,7 +204,7 @@ export const GuestInvoiceDocument = forwardRef<
             </tr>
           </thead>
           <tbody>
-            {!isFood ? (
+            {showRoom ? (
               <>
                 <tr>
                   <td style={tdLeft}>
@@ -241,21 +250,22 @@ export const GuestInvoiceDocument = forwardRef<
                   </tr>
                 ) : null}
               </>
-            ) : (
-              invoice.foodLines.map((line, i) => (
-                <tr key={`${line.orderToken}-${i}`}>
-                  <td style={tdLeft}>
-                    {line.name}
-                    <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
-                      {line.orderToken} · {line.paymentStatus === "paid" ? "Paid" : "Due"}
-                    </span>
-                  </td>
-                  <td style={tdCenter}>{line.qty}</td>
-                  <td style={tdRight}>{fmtMoney(line.unitPrice, rs)}</td>
-                  <td style={{ ...tdRight, fontWeight: 700 }}>{fmtMoney(line.amount, rs)}</td>
-                </tr>
-              ))
-            )}
+            ) : null}
+            {showFood
+              ? invoice.foodLines.map((line, i) => (
+                  <tr key={`${line.orderToken}-${i}`}>
+                    <td style={tdLeft}>
+                      {line.name}
+                      <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
+                        {line.orderToken} · {line.paymentStatus === "paid" ? "Paid" : "Due"}
+                      </span>
+                    </td>
+                    <td style={tdCenter}>{line.qty}</td>
+                    <td style={tdRight}>{fmtMoney(line.unitPrice, rs)}</td>
+                    <td style={{ ...tdRight, fontWeight: 700 }}>{fmtMoney(line.amount, rs)}</td>
+                  </tr>
+                ))
+              : null}
           </tbody>
         </table>
 
@@ -270,7 +280,7 @@ export const GuestInvoiceDocument = forwardRef<
           }}
         >
           <div style={{ width: 280 }}>
-            {!isFood ? (
+            {showRoom ? (
               <>
                 <div style={totalRow}>
                   <span style={{ color: MUTED }}>Room subtotal</span>
@@ -297,12 +307,13 @@ export const GuestInvoiceDocument = forwardRef<
                   </div>
                 ) : null}
               </>
-            ) : (
+            ) : null}
+            {showFood && invoice.foodTotal > 0 ? (
               <div style={totalRow}>
-                <span style={{ color: MUTED }}>Subtotal (food)</span>
+                <span style={{ color: MUTED }}>Food</span>
                 <span>{fmtMoney(invoice.foodTotal, rs)}</span>
               </div>
-            )}
+            ) : null}
             <div style={{ ...totalRow, fontWeight: 700 }}>
               <span>Total amount</span>
               <span>{fmtMoney(invoice.totalBill, rs)}</span>
@@ -428,7 +439,9 @@ export const GuestInvoiceDocument = forwardRef<
             color: MUTED,
           }}
         >
-          {isFood ? "Thank you for dining with us" : "Thank you for staying with us"} ·{" "}
+          {isFood
+            ? "Thank you for dining with us"
+            : "Thank you for staying with us"} ·{" "}
           {hotelName}
         </p>
       </div>

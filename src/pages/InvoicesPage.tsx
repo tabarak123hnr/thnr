@@ -10,7 +10,7 @@ import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
 import { downloadCsv, toCsv } from "../lib/exportSpreadsheet";
-import { buildGuestInvoices, invoiceListStatus } from "../lib/invoiceBuild";
+import { buildGuestInvoices, buildOverallInvoices, invoiceListStatus } from "../lib/invoiceBuild";
 import { downloadInvoicePdf, printInvoiceElement } from "../lib/invoiceExport";
 import { formatRs } from "../lib/utils";
 import {
@@ -49,11 +49,15 @@ function formatDate(iso: string) {
 }
 
 function typeLabel(type: InvoiceType) {
-  return type === "restaurant" ? "Food" : "Room";
+  if (type === "restaurant") return "Food";
+  if (type === "overall") return "Overall";
+  return "Room";
 }
 
-function typeTone(type: InvoiceType): "gold" | "info" {
-  return type === "restaurant" ? "info" : "gold";
+function typeTone(type: InvoiceType): "gold" | "info" | "purple" {
+  if (type === "restaurant") return "info";
+  if (type === "overall") return "purple";
+  return "gold";
 }
 
 export function InvoicesPage() {
@@ -63,7 +67,7 @@ export function InvoicesPage() {
   const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
   const [orders, setOrders] = useState<FoodOrder[]>([]);
   const [statusFilter, setStatusFilter] = useState<"all" | InvoiceListStatus>("all");
-  const [typeFilter, setTypeFilter] = useState<"all" | InvoiceType>("all");
+  const [typeFilter, setTypeFilter] = useState<InvoiceType>("overall");
   const [openInvoice, setOpenInvoice] = useState<GuestInvoice | null>(null);
   const [busy, setBusy] = useState<"print" | "pdf" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -79,10 +83,17 @@ export function InvoicesPage() {
     };
   }, []);
 
-  const invoices = useMemo(
+  const splitInvoices = useMemo(
     () => buildGuestInvoices(checkIns, orders),
     [checkIns, orders],
   );
+
+  const overallInvoices = useMemo(
+    () => buildOverallInvoices(checkIns, orders),
+    [checkIns, orders],
+  );
+
+  const invoices = typeFilter === "overall" ? overallInvoices : splitInvoices;
 
   useEffect(() => {
     if (!openInvoice) return;
@@ -92,19 +103,19 @@ export function InvoicesPage() {
 
   const filtered = useMemo(() => {
     return invoices.filter((inv) => {
-      if (typeFilter !== "all" && inv.type !== typeFilter) return false;
+      if (typeFilter !== "overall" && inv.type !== typeFilter) return false;
       if (statusFilter !== "all" && invoiceListStatus(inv) !== statusFilter) return false;
       return true;
     });
   }, [invoices, statusFilter, typeFilter]);
 
   const stats = useMemo(() => {
-    const room = invoices.filter((i) => i.type === "room");
-    const food = invoices.filter((i) => i.type === "restaurant");
+    const room = splitInvoices.filter((i) => i.type === "room");
+    const food = splitInvoices.filter((i) => i.type === "restaurant");
     let collected = 0;
     let openBalance = 0;
     let unpaidCount = 0;
-    for (const inv of invoices) {
+    for (const inv of splitInvoices) {
       collected += inv.amountPaid;
       openBalance += inv.balanceDue;
       const s = invoiceListStatus(inv);
@@ -113,12 +124,13 @@ export function InvoicesPage() {
     return {
       roomCount: room.length,
       foodCount: food.length,
+      overallCount: overallInvoices.length,
       collected,
       openBalance,
       unpaidCount,
-      total: invoices.length,
+      total: splitInvoices.length,
     };
-  }, [invoices]);
+  }, [splitInvoices, overallInvoices]);
 
   async function onRefresh() {
     setRefreshing(true);
@@ -202,7 +214,7 @@ export function InvoicesPage() {
     <div>
       <PageHeader
         title={t.pages.invoicesTitle}
-        subtitle="Separate room and food invoices — each stay can have both, never mixed on one bill."
+        subtitle={t.pages.invoicesSub}
         actions={
           <>
             <Button
@@ -230,7 +242,8 @@ export function InvoicesPage() {
         }
       />
 
-      <div className="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <StatCard label="Overall invoices" value={String(stats.overallCount)} />
         <StatCard label="Room invoices" value={String(stats.roomCount)} />
         <StatCard label="Food invoices" value={String(stats.foodCount)} />
         <StatCard
@@ -248,7 +261,7 @@ export function InvoicesPage() {
       <div className="mb-3 flex flex-wrap gap-2">
         {(
           [
-            ["all", "All types"],
+            ["overall", "Overall"],
             ["room", "Room"],
             ["restaurant", "Food"],
           ] as const
@@ -286,7 +299,7 @@ export function InvoicesPage() {
 
       <Card>
         {filtered.length === 0 ? (
-          <EmptyState message="No invoices yet. Check in a guest for a room invoice; food invoices appear after counter orders." />
+          <EmptyState message="No invoices yet. Check in a guest for an overall or room invoice; food invoices appear after counter orders." />
         ) : (
           <Table
             headers={[
@@ -317,7 +330,7 @@ export function InvoicesPage() {
                   <Td className="text-muted">{formatDate(inv.checkInAt)}</Td>
                   <Td className="font-semibold">
                     {formatRs(inv.totalBill, t.common.rs)}
-                    {inv.type === "room" && inv.discountPercent > 0 ? (
+                    {inv.type !== "restaurant" && inv.discountPercent > 0 ? (
                       <div className="text-[11px] font-normal text-muted">
                         {inv.discountPercent}% off
                       </div>
