@@ -5,15 +5,30 @@ export function Table({
   headers,
   children,
   colWidths,
+  scrollX = true,
 }: {
   headers: string[];
   children: ReactNode;
   /** Optional widths like ["18%", "8%", ...] matching headers length */
   colWidths?: string[];
+  /** When false, the table fills its container and never shows a horizontal scrollbar. */
+  scrollX?: boolean;
 }) {
   return (
-    <div className="-mx-1 overflow-x-auto overscroll-x-contain px-1 touch-pan-x">
-      <table className="w-full min-w-[520px] table-fixed border-collapse text-sm sm:min-w-[600px] lg:min-w-[680px]">
+    <div
+      className={cn(
+        "-mx-1 px-1",
+        scrollX
+          ? "overflow-x-auto overscroll-x-contain touch-pan-x"
+          : "overflow-x-hidden",
+      )}
+    >
+      <table
+        className={cn(
+          "w-full table-fixed border-collapse text-sm",
+          scrollX && "min-w-[520px] sm:min-w-[600px] lg:min-w-[680px]",
+        )}
+      >
         {colWidths?.length ? (
           <colgroup>
             {colWidths.map((w, i) => (
@@ -27,7 +42,10 @@ export function Table({
               <th
                 key={`${h}-${i}`}
                 scope="col"
-                className="whitespace-nowrap px-2 py-3 text-left font-semibold align-middle sm:px-3"
+                className={cn(
+                  "px-2 py-3 text-left font-semibold align-middle sm:px-3",
+                  scrollX ? "whitespace-nowrap" : "break-words",
+                )}
               >
                 {h}
               </th>
