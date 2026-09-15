@@ -5,12 +5,14 @@ import {
   Pencil,
   Play,
   Plus,
+  Sparkles,
   Trash2,
   UserPlus,
   UserRound,
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardHeader } from "../components/ui/Card";
@@ -43,6 +45,11 @@ import {
   type DutyStatus,
 } from "../services/duties";
 import {
+  HOUSEKEEPING_DUTY_POINTS,
+  subscribeHousekeepingTasks,
+  type HousekeepingTask,
+} from "../services/housekeeping";
+import {
   DEFAULT_DUTY_POINTS,
   DUTY_CATEGORIES,
   DUTY_SHIFTS,
@@ -64,6 +71,29 @@ const statusLabel: Record<DutyStatus, string> = {
   missed: "Missed",
   cancelled: "Cancelled",
 };
+
+const hkStatusLabel: Record<HousekeepingTask["status"], string> = {
+  pending: "Needs cleaning",
+  in_progress: "Cleaning now",
+  done: "Done",
+};
+
+function extraHousekeepingTasks(
+  employeeId: string | undefined,
+  dayDuties: DutyAssignment[],
+  hkTasks: HousekeepingTask[],
+) {
+  if (!employeeId) return [];
+  const linked = new Set(
+    dayDuties.map((d) => d.housekeepingTaskId).filter((id): id is string => Boolean(id)),
+  );
+  return hkTasks.filter(
+    (task) =>
+      task.assigneeId === employeeId &&
+      task.status !== "done" &&
+      !linked.has(task.id),
+  );
+}
 
 type PageTab = "roster" | "daily" | "performance";
 type ScorePeriod = "today" | "week" | "all";
@@ -153,6 +183,7 @@ export function DutiesRosterPage() {
   const [tab, setTab] = useState<PageTab>("daily");
   const [duties, setDuties] = useState<DutyAssignment[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [housekeepingTasks, setHousekeepingTasks] = useState<HousekeepingTask[]>([]);
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | DutyStatus>("open");
   const [dateFilter, setDateFilter] = useState<"today" | "upcoming" | "all">("today");
   const [dailyDate, setDailyDate] = useState(todayIsoDate);
@@ -190,9 +221,11 @@ export function DutiesRosterPage() {
   useEffect(() => {
     const a = subscribeDuties(setDuties);
     const b = subscribeEmployees(setEmployees);
+    const c = subscribeHousekeepingTasks(setHousekeepingTasks);
     return () => {
       a();
       b();
+      c();
     };
   }, []);
 
@@ -219,7 +252,10 @@ export function DutiesRosterPage() {
   );
 
   const dailyGroups = useMemo(() => {
-    const byId = new Map<string, { employee: Employee | null; name: string; rows: DutyAssignment[] }>();
+    const byId = new Map<
+      string,
+      { employee: Employee | null; name: string; assigneeId: string | null; rows: DutyAssignment[] }
+    >();
     for (const row of dailyDuties) {
       const key = row.assigneeId || "unassigned";
       const existing = byId.get(key);
@@ -231,11 +267,25 @@ export function DutiesRosterPage() {
       byId.set(key, {
         employee,
         name: employee?.name || row.assigneeName || "Unassigned",
+        assigneeId: row.assigneeId,
         rows: [row],
       });
     }
+    if (dailyDate === today) {
+      for (const task of housekeepingTasks) {
+        if (!task.assigneeId || task.status === "done") continue;
+        if (byId.has(task.assigneeId)) continue;
+        const employee = employees.find((e) => e.id === task.assigneeId) ?? null;
+        byId.set(task.assigneeId, {
+          employee,
+          name: employee?.name || task.assigneeName || "Unassigned",
+          assigneeId: task.assigneeId,
+          rows: [],
+        });
+      }
+    }
     return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [dailyDuties, employees]);
+  }, [dailyDuties, employees, housekeepingTasks, dailyDate, today]);
 
   const scoredDuties = useMemo(
     () => dutiesInPeriod(duties, scorePeriod, today),
@@ -634,8 +684,14 @@ export function DutiesRosterPage() {
               const open = group.rows.filter(
                 (r) => r.status === "scheduled" || r.status === "in_progress",
               );
+              const extraHk = extraHousekeepingTasks(
+                group.assigneeId || group.employee?.id,
+                group.rows,
+                housekeepingTasks,
+              );
+              const onHousekeepingDuty = group.rows.some((r) => r.category === "Housekeeping");
               return (
-                <Card key={group.employee?.id || group.name}>
+                <Card key={group.assigneeId || group.name}>
                   <CardHeader
                     title={group.name}
                     badge={
@@ -662,22 +718,51 @@ export function DutiesRosterPage() {
                   {group.employee?.designation ? (
                     <p className="-mt-2 mb-3 text-xs text-muted">{group.employee.designation}</p>
                   ) : null}
+                  {onHousekeepingDuty || extraHk.length > 0 ? (
+                    <p className="-mt-1 mb-3 text-xs text-muted">
+                      Housekeeping rooms assigned to this person also show here. Finishing a room
+                      in Housekeeping awards {HOUSEKEEPING_DUTY_POINTS} points.
+                    </p>
+                  ) : null}
                   <ul className="space-y-2">
-                    {group.rows.map((row) => (
+                    {group.rows.map((row) => {
+                      const linkedHk = row.housekeepingTaskId
+                        ? housekeepingTasks.find((t) => t.id === row.housekeepingTaskId)
+                        : null;
+                      const fromHousekeeping = Boolean(row.housekeepingTaskId);
+                      return (
                       <li
                         key={row.id}
                         className="flex flex-col gap-2 rounded-xl border border-app bg-app px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div className="min-w-0">
-                          <p className="font-semibold">{row.title}</p>
+                          <p className="flex flex-wrap items-center gap-1.5 font-semibold">
+                            {fromHousekeeping ? (
+                              <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                            ) : null}
+                            {row.title}
+                          </p>
                           <p className="mt-0.5 text-xs text-muted">
                             {row.category} · {row.shift} · {dutyPoints(row)} pts
                             {row.checkedInBy ? ` · in by ${row.checkedInBy}` : ""}
+                            {linkedHk
+                              ? ` · ${hkStatusLabel[linkedHk.status]}`
+                              : fromHousekeeping
+                                ? " · from Housekeeping"
+                                : ""}
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-1.5">
                           <Badge tone={statusTone[row.status]}>{statusLabel[row.status]}</Badge>
-                          {row.status === "scheduled" ? (
+                          {fromHousekeeping ? (
+                            <Link
+                              to="/housekeeping"
+                              className="inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-semibold text-[var(--accent)] hover:underline"
+                            >
+                              Open in Housekeeping
+                            </Link>
+                          ) : null}
+                          {!fromHousekeeping && row.status === "scheduled" ? (
                             <Button
                               size="sm"
                               variant="gold"
@@ -687,7 +772,7 @@ export function DutiesRosterPage() {
                               Start
                             </Button>
                           ) : null}
-                          {row.status === "in_progress" ? (
+                          {!fromHousekeeping && row.status === "in_progress" ? (
                             <Button
                               size="sm"
                               variant="gold"
@@ -707,6 +792,35 @@ export function DutiesRosterPage() {
                               Missed
                             </Button>
                           ) : null}
+                        </div>
+                      </li>
+                      );
+                    })}
+                    {extraHk.map((task) => (
+                      <li
+                        key={`hk-${task.id}`}
+                        className="flex flex-col gap-2 rounded-xl border border-dashed border-app bg-app px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <p className="flex flex-wrap items-center gap-1.5 font-semibold">
+                            <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                            Clean Room {task.roomNumber}
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted">
+                            Housekeeping · {HOUSEKEEPING_DUTY_POINTS} pts when done ·{" "}
+                            {hkStatusLabel[task.status]}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge tone={task.status === "in_progress" ? "info" : "gold"}>
+                            {hkStatusLabel[task.status]}
+                          </Badge>
+                          <Link
+                            to="/housekeeping"
+                            className="inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-semibold text-[var(--accent)] hover:underline"
+                          >
+                            Open in Housekeeping
+                          </Link>
                         </div>
                       </li>
                     ))}
@@ -841,12 +955,20 @@ export function DutiesRosterPage() {
                   </Td>
                 </Tr>
               ) : (
-                filtered.map((row) => (
+                filtered.map((row) => {
+                  const fromHousekeeping = Boolean(row.housekeepingTaskId);
+                  return (
                   <Tr key={row.id}>
                     <Td>
-                      <p className="font-semibold">{row.title}</p>
+                      <p className="flex flex-wrap items-center gap-1.5 font-semibold">
+                        {fromHousekeeping ? (
+                          <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                        ) : null}
+                        {row.title}
+                      </p>
                       <p className="mt-0.5 text-xs text-muted">
                         {row.category} · {formatDutyDate(row.date)} · {row.shift}
+                        {fromHousekeeping ? " · room task" : ""}
                       </p>
                     </Td>
                     <Td>
@@ -872,7 +994,15 @@ export function DutiesRosterPage() {
                         >
                           View
                         </Button>
-                        {row.status === "scheduled" && row.assigneeId ? (
+                        {fromHousekeeping ? (
+                          <Link
+                            to="/housekeeping"
+                            className="inline-flex h-8 items-center rounded-lg bg-[color-mix(in_oklab,var(--accent)_18%,transparent)] px-2.5 text-xs font-semibold text-[var(--accent)]"
+                          >
+                            Housekeeping
+                          </Link>
+                        ) : null}
+                        {!fromHousekeeping && row.status === "scheduled" && row.assigneeId ? (
                           <Button
                             size="sm"
                             variant="gold"
@@ -883,7 +1013,7 @@ export function DutiesRosterPage() {
                             Start
                           </Button>
                         ) : null}
-                        {row.status === "scheduled" && !row.assigneeId ? (
+                        {!fromHousekeeping && row.status === "scheduled" && !row.assigneeId ? (
                           <Button
                             size="sm"
                             variant="gold"
@@ -894,7 +1024,7 @@ export function DutiesRosterPage() {
                             Assign
                           </Button>
                         ) : null}
-                        {row.status === "in_progress" ? (
+                        {!fromHousekeeping && row.status === "in_progress" ? (
                           <Button
                             size="sm"
                             variant="gold"
@@ -937,7 +1067,8 @@ export function DutiesRosterPage() {
                       </div>
                     </Td>
                   </Tr>
-                ))
+                  );
+                })
               )}
             </Table>
           </Card>
@@ -962,6 +1093,9 @@ export function DutiesRosterPage() {
               <Badge tone="gold">{viewRow.shift}</Badge>
               <Badge tone={statusTone[viewRow.status]}>{statusLabel[viewRow.status]}</Badge>
               <Badge tone="gold">{dutyPoints(viewRow)} pts</Badge>
+              {viewRow.housekeepingTaskId ? (
+                <Badge tone="info">Housekeeping room</Badge>
+              ) : null}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <Detail label="Assigned to" value={viewRow.assigneeName || "Unassigned"} />

@@ -178,7 +178,7 @@ export const en = {
     employeesTitle: "Employees",
     employeesSub: "Staff roster, address, background, and CNIC.",
     dutiesTitle: "Duties roster",
-    dutiesSub: "Daily tasks for staff, supervisors, and a performance score that drops when work is missed.",
+    dutiesSub: "Daily tasks for staff, supervisors, and a performance score that drops when work is missed. Housekeeping room cleans also appear here and award 10 points when done.",
     attendanceTitle: "Attendance",
     attendanceSub: "Clock employees in and out using the current time.",
     reportsTitle: "Reports",

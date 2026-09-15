@@ -53,6 +53,8 @@ export interface DutyAssignment {
   checkedOutById: string | null;
   checkedOutBy: string;
   notes: string;
+  /** Linked housekeeping room task, if this duty was created from Housekeeping */
+  housekeepingTaskId: string | null;
   createdAt?: unknown;
   updatedAt?: unknown;
   createdBy?: string;

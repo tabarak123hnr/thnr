@@ -1,4 +1,4 @@
-import { Check, ImagePlus, Pencil, Plus, UserPlus, X } from "lucide-react";
+import { Check, ImagePlus, Pencil, Play, Plus, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
@@ -12,6 +12,7 @@ import { uploadImageToCloudinary } from "../lib/cloudinary";
 import { subscribeEmployees, type Employee } from "../services/employees";
 import {
   createHousekeepingTask,
+  HOUSEKEEPING_DUTY_POINTS,
   subscribeHousekeepingTasks,
   updateHousekeepingTask,
   type HousekeepingPriority,
@@ -102,6 +103,10 @@ export function HousekeepingPage() {
   const [assignEmployeeId, setAssignEmployeeId] = useState("");
   const [assignSaving, setAssignSaving] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+
+  const [startTask, setStartTask] = useState<HousekeepingTask | null>(null);
+  const [startSaving, setStartSaving] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const [dirtyPhotoFile, setDirtyPhotoFile] = useState<File | null>(null);
   const [dirtyPhotoPreview, setDirtyPhotoPreview] = useState<string | null>(null);
 
@@ -239,7 +244,6 @@ export function HousekeepingPage() {
   }
 
   function openAssign(task: HousekeepingTask) {
-    clearDirtyPhoto();
     setAssignTask(task);
     setAssignEmployeeId(task.assigneeId || "");
     setAssignError(null);
@@ -250,13 +254,30 @@ export function HousekeepingPage() {
     setAssignTask(null);
     setAssignEmployeeId("");
     setAssignError(null);
-    clearDirtyPhoto();
   }
 
   function resetAssignState() {
     setAssignTask(null);
     setAssignEmployeeId("");
     setAssignError(null);
+  }
+
+  function openStart(task: HousekeepingTask) {
+    clearDirtyPhoto();
+    setStartTask(task);
+    setStartError(null);
+  }
+
+  function closeStart() {
+    if (startSaving) return;
+    setStartTask(null);
+    setStartError(null);
+    clearDirtyPhoto();
+  }
+
+  function resetStartState() {
+    setStartTask(null);
+    setStartError(null);
     clearDirtyPhoto();
   }
 
@@ -287,33 +308,24 @@ export function HousekeepingPage() {
       setAssignError("Pick who will clean this room.");
       return;
     }
-    if (!dirtyPhotoFile) {
-      setAssignError("Upload a photo of the dirty room before assigning.");
-      return;
-    }
 
     setAssignSaving(true);
     setAssignError(null);
     try {
-      const dirtyRoomImageUrl = await uploadImageToCloudinary(
-        dirtyPhotoFile,
-        "tabarak/housekeeping",
-      );
       await updateHousekeepingTask(assignTask.id, {
         roomId: assignTask.roomId,
         roomNumber: assignTask.roomNumber,
         type: assignTask.type,
         priority: assignTask.priority,
-        status: "in_progress",
+        status: "pending",
         assigneeId: employee.id,
         assigneeName: employee.name,
         dueAt: assignTask.dueAt,
         notes: assignTask.notes,
-        dirtyRoomImageUrl,
       });
       toastSuccess(
         "Assigned",
-        `${employee.name} is cleaning Room ${assignTask.roomNumber}`,
+        `${employee.name} will clean Room ${assignTask.roomNumber}. It also appears on their duties roster (+${HOUSEKEEPING_DUTY_POINTS} pts when done).`,
       );
       resetAssignState();
     } catch (err) {
@@ -322,6 +334,51 @@ export function HousekeepingPage() {
       toastError("Assign failed", message);
     } finally {
       setAssignSaving(false);
+    }
+  }
+
+  async function submitStart(e: React.FormEvent) {
+    e.preventDefault();
+    if (!startTask) return;
+    if (!startTask.assigneeId) {
+      setStartError("Assign staff before starting.");
+      return;
+    }
+    if (!dirtyPhotoFile) {
+      setStartError("Upload a photo of the dirty room to start.");
+      return;
+    }
+
+    setStartSaving(true);
+    setStartError(null);
+    try {
+      const dirtyRoomImageUrl = await uploadImageToCloudinary(
+        dirtyPhotoFile,
+        "tabarak/housekeeping",
+      );
+      await updateHousekeepingTask(startTask.id, {
+        roomId: startTask.roomId,
+        roomNumber: startTask.roomNumber,
+        type: startTask.type,
+        priority: startTask.priority,
+        status: "in_progress",
+        assigneeId: startTask.assigneeId,
+        assigneeName: startTask.assigneeName || "Staff",
+        dueAt: startTask.dueAt,
+        notes: startTask.notes,
+        dirtyRoomImageUrl,
+      });
+      toastSuccess(
+        "Cleaning started",
+        `${startTask.assigneeName || "Staff"} is cleaning Room ${startTask.roomNumber}`,
+      );
+      resetStartState();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not start.";
+      setStartError(message);
+      toastError("Start failed", message);
+    } finally {
+      setStartSaving(false);
     }
   }
 
@@ -351,7 +408,14 @@ export function HousekeepingPage() {
         notes: doneTask.notes,
         ...(cleanRoomImageUrl !== undefined ? { cleanRoomImageUrl } : {}),
       });
-      toastSuccess("Marked done", `Room ${doneTask.roomNumber} is clean`);
+      toastSuccess(
+        "Marked done",
+        `Room ${doneTask.roomNumber} is clean${
+          doneTask.assigneeName
+            ? ` · ${doneTask.assigneeName} +${HOUSEKEEPING_DUTY_POINTS} pts`
+            : ""
+        }`,
+      );
       resetDoneState();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not mark done.";
@@ -411,7 +475,7 @@ export function HousekeepingPage() {
     <div>
       <PageHeader
         title={t.pages.housekeepingTitle}
-        subtitle="Assign with a dirty-room photo, then Mark done (optional clean photo) when finished."
+        subtitle="Assign staff, Start with a dirty-room photo, then Mark done with a clean-room photo. Finished rooms give 10 points on the duties roster."
         actions={
           <>
             <div className="min-w-[9rem] flex-1 sm:w-44 sm:flex-none">
@@ -502,16 +566,17 @@ export function HousekeepingPage() {
           <div>
             <p className="font-bold">Cleaning tasks</p>
             <p className="text-xs text-muted">
-              <span className="font-semibold text-app">Assign</span> (dirty photo) starts cleaning.
-              Then only <span className="font-semibold text-app">Mark done</span> shows — add a clean
-              photo if you want.
+              <span className="font-semibold text-app">Assign</span> staff only.{" "}
+              <span className="font-semibold text-app">Start</span> adds the dirty-room photo.{" "}
+              <span className="font-semibold text-app">Mark done</span> adds the clean-room photo and
+              awards {HOUSEKEEPING_DUTY_POINTS} points on the duties roster.
             </p>
           </div>
         </div>
         {filtered.length === 0 ? (
           <p className="rounded-xl border border-dashed border-app px-4 py-8 text-center text-sm text-muted">
-            No tasks here. When a guest checks out, a “Needs cleaning” task appears — Assign someone
-            with a dirty-room photo, then Mark done.
+            No tasks here. When a guest checks out, a “Needs cleaning” task appears — Assign someone,
+            Start with a dirty-room photo, then Mark done.
           </p>
         ) : (
           <div className="grid gap-3">
@@ -583,7 +648,17 @@ export function HousekeepingPage() {
                         icon={<UserPlus className="h-3.5 w-3.5" />}
                         onClick={() => openAssign(task)}
                       >
-                        Assign
+                        {task.assigneeId ? "Reassign" : "Assign"}
+                      </Button>
+                    ) : null}
+                    {task.status === "pending" && task.assigneeId ? (
+                      <Button
+                        size="sm"
+                        className="flex-1 cursor-pointer justify-center sm:flex-none"
+                        icon={<Play className="h-3.5 w-3.5" />}
+                        onClick={() => openStart(task)}
+                      >
+                        Start
                       </Button>
                     ) : null}
                     {task.status === "in_progress" ? (
@@ -619,7 +694,7 @@ export function HousekeepingPage() {
         title="Assign cleaner"
         subtitle={
           assignTask
-            ? `Room ${assignTask.roomNumber} — upload a dirty-room photo and pick who cleans.`
+            ? `Room ${assignTask.roomNumber} — pick who will clean. Photos are added when they Start and Mark done.`
             : undefined
         }
         footer={
@@ -628,7 +703,7 @@ export function HousekeepingPage() {
               Cancel
             </Button>
             <Button type="submit" form="hk-assign-form" variant="gold" disabled={assignSaving}>
-              {assignSaving ? "Assigning…" : "Assign & start"}
+              {assignSaving ? "Assigning…" : "Assign"}
             </Button>
           </>
         }
@@ -654,6 +729,48 @@ export function HousekeepingPage() {
             />
           </SelectField>
 
+          <p className="text-sm text-muted">
+            After you assign, this task stays <strong>Needs cleaning</strong> until{" "}
+            <strong>Start</strong>. Completing it adds {HOUSEKEEPING_DUTY_POINTS} points on the
+            duties roster.
+          </p>
+          {!assigneeOptions.length ? (
+            <p className="text-sm text-muted">
+              Tip: add active staff under Employees (Housekeeping) so you can assign them.
+            </p>
+          ) : null}
+        </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(startTask)}
+        onClose={closeStart}
+        title="Start cleaning"
+        subtitle={
+          startTask
+            ? `Room ${startTask.roomNumber}${
+                startTask.assigneeName ? ` · ${startTask.assigneeName}` : ""
+              } — upload a dirty-room photo to begin.`
+            : undefined
+        }
+        footer={
+          <>
+            <Button type="button" variant="secondary" disabled={startSaving} onClick={closeStart}>
+              Cancel
+            </Button>
+            <Button type="submit" form="hk-start-form" variant="gold" disabled={startSaving}>
+              {startSaving ? "Starting…" : "Start"}
+            </Button>
+          </>
+        }
+      >
+        <form id="hk-start-form" className="space-y-4" onSubmit={(e) => void submitStart(e)}>
+          {startError ? (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+              {startError}
+            </p>
+          ) : null}
+
           <input
             ref={dirtyPhotoRef}
             type="file"
@@ -670,14 +787,9 @@ export function HousekeepingPage() {
           />
 
           <p className="text-sm text-muted">
-            After you assign, this task shows as <strong>Cleaning now</strong> with only{" "}
-            <strong>Mark done</strong> — Assign is hidden.
+            After you start, this task shows as <strong>Cleaning now</strong>. Mark done when the
+            room is finished and add a clean-room photo.
           </p>
-          {!assigneeOptions.length ? (
-            <p className="text-sm text-muted">
-              Tip: add active staff under Employees (Housekeeping) so you can assign them.
-            </p>
-          ) : null}
         </form>
       </Modal>
 
@@ -687,7 +799,7 @@ export function HousekeepingPage() {
         title="Mark room clean"
         subtitle={
           doneTask
-            ? `Room ${doneTask.roomNumber}${doneTask.assigneeName ? ` · ${doneTask.assigneeName}` : ""} — optionally add a clean-room photo.`
+            ? `Room ${doneTask.roomNumber}${doneTask.assigneeName ? ` · ${doneTask.assigneeName}` : ""} — add a clean-room photo, then finish.`
             : undefined
         }
         footer={
@@ -711,7 +823,7 @@ export function HousekeepingPage() {
           {doneTask?.dirtyRoomImageUrl ? (
             <div>
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
-                Dirty room (at assign)
+                Dirty room (at start)
               </p>
               <a
                 href={doneTask.dirtyRoomImageUrl}
@@ -736,14 +848,15 @@ export function HousekeepingPage() {
             onChange={(e) => onPickCleanPhoto(e.target.files?.[0] ?? null)}
           />
           <PhotoUploadSlot
-            label="Clean room photo (optional)"
+            label="Clean room photo"
             preview={cleanPhotoPreview}
             onPick={() => cleanPhotoRef.current?.click()}
             onClear={clearCleanPhoto}
           />
 
           <p className="text-sm text-muted">
-            Room will be marked clean and available for the next guest.
+            Room will be marked clean. {doneTask?.assigneeName || "The assigned staff member"} earns{" "}
+            {HOUSEKEEPING_DUTY_POINTS} points on the duties roster.
           </p>
         </form>
       </Modal>
@@ -752,7 +865,7 @@ export function HousekeepingPage() {
         open={modalOpen}
         onClose={() => !saving && setModalOpen(false)}
         title={editingId ? "Update task" : "Add housekeeping task"}
-        subtitle="Pick a room and assign an employee. Starting or finishing updates room cleaning status."
+        subtitle="Pick a room and assign an employee. Start and finish from the task list so dirty and clean photos are captured."
         wide
         footer={
           <>

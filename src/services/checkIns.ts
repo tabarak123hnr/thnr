@@ -467,6 +467,7 @@ async function ensureCheckoutCleanTask(roomId: string, roomNumber: string) {
     notes: "Auto-created after guest checkout",
     dirtyRoomImageUrl: null,
     cleanRoomImageUrl: null,
+    dutyId: null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     createdBy: auth.currentUser?.uid ?? null,

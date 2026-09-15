@@ -190,7 +190,7 @@ export function buildOpsNotifications(input: {
         category: "housekeeping",
         severity: overdue || task.priority === "high" ? "critical" : "warning",
         title: `Needs cleaner · Room ${task.roomNumber}`,
-        body: `${task.type.replace(/_/g, " ")} · ${task.priority} priority · assign staff & dirty-room photo`,
+        body: `${task.type.replace(/_/g, " ")} · ${task.priority} priority · assign staff, then start with a dirty-room photo`,
         href: "/housekeeping",
         atMs: due,
       });
@@ -210,7 +210,7 @@ export function buildOpsNotifications(input: {
         category: "housekeeping",
         severity: overdue ? "warning" : "info",
         title: `Cleaning queued · Room ${task.roomNumber}`,
-        body: `${task.assigneeName || "Assigned"} · ${task.type.replace(/_/g, " ")}`,
+        body: `${task.assigneeName || "Assigned"} · start with a dirty-room photo`,
         href: "/housekeeping",
         atMs: due,
       });

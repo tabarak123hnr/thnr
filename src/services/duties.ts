@@ -74,6 +74,9 @@ function mapDuty(id: string, data: Record<string, unknown>): DutyAssignment {
     checkedOutById: data.checkedOutById ? String(data.checkedOutById) : null,
     checkedOutBy: String(data.checkedOutBy ?? ""),
     notes: String(data.notes ?? ""),
+    housekeepingTaskId: data.housekeepingTaskId
+      ? String(data.housekeepingTaskId)
+      : null,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
     createdBy: data.createdBy ? String(data.createdBy) : undefined,
@@ -108,6 +111,7 @@ export type DutyInput = {
   checkedOutById: string | null;
   checkedOutBy: string;
   notes: string;
+  housekeepingTaskId?: string | null;
 };
 
 export function dutyToInput(
@@ -129,12 +133,13 @@ export function dutyToInput(
     checkedOutById: duty.checkedOutById,
     checkedOutBy: duty.checkedOutBy,
     notes: duty.notes,
+    housekeepingTaskId: duty.housekeepingTaskId,
     ...patch,
   };
 }
 
 function payloadFromInput(input: DutyInput) {
-  return {
+  const payload: Record<string, unknown> = {
     title: input.title.trim(),
     category: input.category,
     description: input.description.trim(),
@@ -150,6 +155,10 @@ function payloadFromInput(input: DutyInput) {
     checkedOutBy: input.checkedOutBy.trim(),
     notes: input.notes.trim(),
   };
+  if (input.housekeepingTaskId !== undefined) {
+    payload.housekeepingTaskId = input.housekeepingTaskId || null;
+  }
+  return payload;
 }
 
 export async function createDuty(input: DutyInput) {
