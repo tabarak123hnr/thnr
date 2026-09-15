@@ -52,6 +52,7 @@ function mapTask(id: string, data: Record<string, unknown>): HousekeepingTask {
     updatedAt: data.updatedAt,
     createdBy: data.createdBy ? String(data.createdBy) : undefined,
     completedAt: data.completedAt,
+    completedOn: completedOnFromValue(data.completedAt),
   };
 }
 
@@ -59,12 +60,6 @@ function dutyStatusFromTask(status: HousekeepingTaskStatus): DutyStatus {
   if (status === "in_progress") return "in_progress";
   if (status === "done") return "completed";
   return "scheduled";
-}
-
-function dateFromDueAt(dueAt: string) {
-  const d = new Date(dueAt);
-  if (Number.isNaN(d.getTime())) return todayIsoDate();
-  return todayIsoDate(d);
 }
 
 function asDutyShift(value: unknown): DutyShift {
@@ -75,19 +70,42 @@ function asDutyShift(value: unknown): DutyShift {
   return "Morning";
 }
 
-async function findLinkedDutyId(taskId: string, storedDutyId?: string | null) {
-  if (storedDutyId) {
-    const snap = await getDoc(doc(db, "dutyRoster", storedDutyId));
-    if (snap.exists()) return storedDutyId;
+function completedOnFromValue(value: unknown): string | null {
+  if (!value) return null;
+  let d: Date | null = null;
+  if (
+    typeof value === "object" &&
+    value &&
+    "toDate" in value &&
+    typeof (value as { toDate: () => Date }).toDate === "function"
+  ) {
+    d = (value as { toDate: () => Date }).toDate();
+  } else if (typeof value === "object" && value && "seconds" in value) {
+    d = new Date(Number((value as { seconds: number }).seconds) * 1000);
+  } else {
+    d = new Date(String(value));
   }
-  const snap = await getDocs(
-    query(
-      collection(db, "dutyRoster"),
-      where("housekeepingTaskId", "==", taskId),
-      limit(1),
-    ),
-  );
-  return snap.docs[0]?.id ?? null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return todayIsoDate(d);
+}
+
+async function findLinkedDutyId(taskId: string, storedDutyId?: string | null) {
+  try {
+    if (storedDutyId) {
+      const snap = await getDoc(doc(db, "dutyRoster", storedDutyId));
+      if (snap.exists()) return storedDutyId;
+    }
+    const snap = await getDocs(
+      query(
+        collection(db, "dutyRoster"),
+        where("housekeepingTaskId", "==", taskId),
+        limit(1),
+      ),
+    );
+    return snap.docs[0]?.id ?? null;
+  } catch {
+    return storedDutyId || null;
+  }
 }
 
 async function lookupEmployeeShift(employeeId: string): Promise<DutyShift> {
@@ -133,21 +151,28 @@ async function syncLinkedHousekeepingDuty(
   ]
     .filter(Boolean)
     .join(" · ");
+  const workDate = todayIsoDate();
+  const assigneeName = input.assigneeName || "Staff";
 
   if (existingId) {
     const patch: Record<string, unknown> = {
       title,
       category: "Housekeeping",
       description,
+      date: workDate,
       status: dutyStatus,
       points: HOUSEKEEPING_DUTY_POINTS,
       assigneeId: input.assigneeId,
-      assigneeName: input.assigneeName,
+      assigneeName,
       housekeepingTaskId: taskId,
       updatedAt: serverTimestamp(),
     };
+    if (dutyStatus === "in_progress") {
+      patch.checkedInBy = assigneeName;
+      patch.checkedInById = input.assigneeId;
+    }
     if (dutyStatus === "completed") {
-      patch.checkedOutBy = input.assigneeName || "";
+      patch.checkedOutBy = assigneeName;
       patch.checkedOutById = input.assigneeId;
     }
     await updateDoc(doc(db, "dutyRoster", existingId), patch);
@@ -162,16 +187,17 @@ async function syncLinkedHousekeepingDuty(
     title,
     category: "Housekeeping",
     description,
-    date: dateFromDueAt(input.dueAt),
+    date: workDate,
     shift,
     status: dutyStatus,
     points: HOUSEKEEPING_DUTY_POINTS,
     assigneeId: input.assigneeId,
-    assigneeName: input.assigneeName,
-    checkedInById: null,
-    checkedInBy: "",
+    assigneeName,
+    checkedInById: dutyStatus === "in_progress" || dutyStatus === "completed" ? input.assigneeId : null,
+    checkedInBy:
+      dutyStatus === "in_progress" || dutyStatus === "completed" ? assigneeName : "",
     checkedOutById: dutyStatus === "completed" ? input.assigneeId : null,
-    checkedOutBy: dutyStatus === "completed" ? input.assigneeName || "" : "",
+    checkedOutBy: dutyStatus === "completed" ? assigneeName : "",
     notes: "",
     housekeepingTaskId: taskId,
     createdAt: serverTimestamp(),

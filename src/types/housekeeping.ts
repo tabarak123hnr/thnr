@@ -40,4 +40,6 @@ export interface HousekeepingTask {
   updatedAt?: unknown;
   createdBy?: string;
   completedAt?: unknown;
+  /** Local YYYY-MM-DD when the room was marked done */
+  completedOn?: string | null;
 }
