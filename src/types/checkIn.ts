@@ -55,13 +55,20 @@ export interface CheckInRecord {
   balanceDue: number;
   /** Snapshot of room rate at check-in / last update (before discount) */
   nightlyRate: number;
-  /** 0–100 off room charges (not food extras) */
+  /** 0–100 off room (after GST) */
   discountPercent: number;
   discountAmount: number;
   discountedNightlyRate: number;
   nights: number;
   roomCharges: number;
   extraCharges: number;
+  subtotal: number;
+  taxRateId: string | null;
+  taxLabel: string;
+  taxPercent: number;
+  taxAppliesToRoom: boolean;
+  taxAppliesToFood: boolean;
+  taxAmount: number;
   totalBill: number;
   checkedOutAt?: string | null;
   checkoutMode?: "manual" | "automatic" | null;

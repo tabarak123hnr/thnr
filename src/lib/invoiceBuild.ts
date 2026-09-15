@@ -1,6 +1,10 @@
-import { calcRoomBill } from "./billing";
+import { calcRoomBill, roundMoney, taxOptionsFromStay } from "./billing";
 import type { CheckInRecord, PaymentStatus, PaymentTiming } from "../types/checkIn";
-import type { FoodOrder } from "../types/order";
+import {
+  orderTaxAmount,
+  orderTicketTotal,
+  type FoodOrder,
+} from "../types/order";
 import {
   invoiceListStatus,
   type GuestInvoice,
@@ -36,6 +40,7 @@ function resolveBill(row: CheckInRecord) {
     row.checkOutAt,
     row.extraCharges || 0,
     row.discountPercent || 0,
+    taxOptionsFromStay(row),
   );
 }
 
@@ -62,6 +67,38 @@ function stayOrdersFor(row: CheckInRecord, orders: FoodOrder[]) {
   return orders.filter((o) => o.checkInId === row.id);
 }
 
+/**
+ * GST for food folio — once only per rupee of food:
+ * use each ticket’s stored GST when present; otherwise stay food GST %.
+ * Never add order tax and stay tax on the same ticket.
+ */
+function foodGstForOrders(row: CheckInRecord, stayOrders: FoodOrder[], foodTotal: number) {
+  const stayPct = row.taxPercent || 0;
+  const stayFood = row.taxAppliesToFood && stayPct > 0;
+
+  let taxAmount = 0;
+  let taxPercent = 0;
+
+  for (const o of stayOrders) {
+    const stored = orderTaxAmount(o);
+    if (stored > 0 || (Number(o.taxPercent) || 0) > 0) {
+      taxAmount += stored;
+      taxPercent = Number(o.taxPercent) || taxPercent || stayPct;
+    } else if (stayFood) {
+      taxAmount += roundMoney(((o.amount || 0) * stayPct) / 100);
+      taxPercent = stayPct;
+    }
+  }
+
+  taxAmount = roundMoney(taxAmount);
+  if (taxAmount <= 0 && stayFood && foodTotal > 0) {
+    taxAmount = roundMoney((foodTotal * stayPct) / 100);
+    taxPercent = stayPct;
+  }
+
+  return { taxAmount, taxPercent };
+}
+
 function guestBase(row: CheckInRecord) {
   return {
     checkInId: row.id,
@@ -79,6 +116,10 @@ function guestBase(row: CheckInRecord) {
     adults: row.adults,
     children: row.children,
     paymentTiming: row.paymentTiming,
+    taxLabel: row.taxLabel || (row.taxPercent > 0 ? `GST ${row.taxPercent}%` : ""),
+    taxPercent: row.taxPercent || 0,
+    taxAppliesToRoom: row.taxAppliesToRoom !== false,
+    taxAppliesToFood: row.taxAppliesToFood !== false,
   };
 }
 
@@ -101,29 +142,45 @@ function buildFoodLines(orders: FoodOrder[], forcePaid: boolean): InvoiceFoodLin
   return lines;
 }
 
-/** Room stay folio only — accommodation (+ non-food extras). */
+/**
+ * Room folio — accommodation + non-food extras.
+ * Food GST is never included here (lives on the food invoice only).
+ */
 export function buildRoomInvoice(
   row: CheckInRecord,
   orders: FoodOrder[] = [],
 ): GuestInvoice {
   const bill = resolveBill(row);
   const stayOrders = stayOrdersFor(row, orders);
-  const foodTotal = stayOrders.reduce((s, o) => s + (o.amount || 0), 0);
+  const foodPretax = stayOrders.reduce((s, o) => s + (o.amount || 0), 0);
   const settled = isStaySettled(row);
 
-  const foodPaid = settled
-    ? foodTotal
+  const foodPaidTickets = settled
+    ? stayOrders.reduce((s, o) => s + orderTicketTotal(o), 0)
     : stayOrders
         .filter((o) => o.paymentStatus === "paid")
-        .reduce((s, o) => s + (o.amount || 0), 0);
+        .reduce((s, o) => s + orderTicketTotal(o), 0);
 
-  const otherExtras = Math.max(0, (bill.extraCharges || 0) - foodTotal);
-  const roomTotal = Math.max(0, bill.roomCharges + otherExtras);
+  const otherExtras = Math.max(0, (bill.extraCharges || 0) - foodPretax);
+  const pct = bill.taxPercent || 0;
+
+  // Room tax only — do not re-tax food (food GST is on the food folio)
+  const roomTax = bill.taxAppliesToRoom
+    ? roundMoney((bill.roomChargesBefore * pct) / 100)
+    : 0;
+  // Non-food extras follow the same rule as stay extras tax when food GST is on
+  const otherExtrasTax =
+    otherExtras > 0 && pct > 0 && (bill.taxAppliesToFood || bill.taxAppliesToRoom)
+      ? roundMoney((otherExtras * pct) / 100)
+      : 0;
+  const taxAmount = roundMoney(roomTax + otherExtrasTax);
+  const discount = roundMoney(bill.discountAmount || 0);
+  const roomTotal = roundMoney(
+    Math.max(0, bill.roomChargesBefore + otherExtras + taxAmount - discount),
+  );
 
   const stayPaid = Math.max(0, Number(row.amountPaid) || 0);
-  // Settled checkout: room folio is paid in full.
-  // Otherwise cash first covers paid food tickets; remainder applies to room.
-  const roomPaidRaw = settled ? roomTotal : Math.max(0, stayPaid - foodPaid);
+  const roomPaidRaw = settled ? roomTotal : Math.max(0, stayPaid - foodPaidTickets);
   const split = paymentFromSplit(roomTotal, roomPaidRaw);
 
   let paymentTiming: PaymentTiming = row.paymentTiming;
@@ -139,13 +196,14 @@ export function buildRoomInvoice(
     nightlyRate: bill.nightlyRate,
     discountedNightlyRate: bill.discountedNightlyRate,
     discountPercent: bill.discountPercent,
-    discountAmount: bill.discountAmount,
+    discountAmount: discount,
     roomChargesBefore: bill.roomChargesBefore,
     roomCharges: bill.roomCharges,
     foodLines: [],
     foodTotal: 0,
     otherExtras,
     extraCharges: otherExtras,
+    taxAmount,
     totalBill: roomTotal,
     amountPaid: split.amountPaid,
     balanceDue: split.balanceDue,
@@ -155,7 +213,7 @@ export function buildRoomInvoice(
   };
 }
 
-/** Restaurant / room-service folio only — food orders for the stay. */
+/** Restaurant folio — food pretax + GST once (from tickets or stay food rate). */
 export function buildFoodInvoice(
   row: CheckInRecord,
   orders: FoodOrder[] = [],
@@ -163,30 +221,39 @@ export function buildFoodInvoice(
   const stayOrders = stayOrdersFor(row, orders);
   if (!stayOrders.length) return null;
 
-  const bill = resolveBill(row);
   const settled = isStaySettled(row);
   const foodLines = buildFoodLines(stayOrders, settled);
   const foodTotal = foodLines.reduce((s, l) => s + l.amount, 0);
   if (foodTotal <= 0) return null;
 
+  const { taxAmount, taxPercent } = foodGstForOrders(row, stayOrders, foodTotal);
+  const folioTotal = roundMoney(foodTotal + taxAmount);
+
   const foodPaid = settled
-    ? foodTotal
+    ? folioTotal
     : stayOrders
         .filter((o) => o.paymentStatus === "paid")
-        .reduce((s, o) => s + (o.amount || 0), 0);
-  const split = paymentFromSplit(foodTotal, foodPaid);
+        .reduce((s, o) => s + orderTicketTotal(o), 0);
+  const split = paymentFromSplit(folioTotal, foodPaid);
 
   let paymentTiming: PaymentTiming = "due_on_checkout";
   if (split.balanceDue <= 0) paymentTiming = "paid_at_checkin";
   else if (split.amountPaid > 0) paymentTiming = "partial";
 
+  const base = guestBase(row);
+
   return {
-    ...guestBase(row),
+    ...base,
+    taxPercent: taxPercent || base.taxPercent,
+    taxLabel:
+      taxAmount > 0
+        ? base.taxLabel || `GST ${taxPercent || base.taxPercent}%`
+        : "",
     id: `${row.id}-food`,
     number: foodInvoiceNumber(row.id, row.roomNumber, row.checkInAt),
-    nights: bill.nights,
-    nightlyRate: bill.nightlyRate,
-    discountedNightlyRate: bill.discountedNightlyRate,
+    nights: 0,
+    nightlyRate: 0,
+    discountedNightlyRate: 0,
     discountPercent: 0,
     discountAmount: 0,
     roomChargesBefore: 0,
@@ -195,7 +262,8 @@ export function buildFoodInvoice(
     foodTotal,
     otherExtras: 0,
     extraCharges: foodTotal,
-    totalBill: foodTotal,
+    taxAmount,
+    totalBill: folioTotal,
     amountPaid: split.amountPaid,
     balanceDue: split.balanceDue,
     paymentStatus: split.paymentStatus,
@@ -204,7 +272,7 @@ export function buildFoodInvoice(
   };
 }
 
-/** One folio for the stay: room + food together. */
+/** One folio for the stay: room + food together (tax already split cleanly). */
 export function buildOverallInvoice(
   row: CheckInRecord,
   orders: FoodOrder[] = [],
@@ -213,7 +281,8 @@ export function buildOverallInvoice(
   const food = buildFoodInvoice(row, orders);
   const foodTotal = food?.foodTotal ?? 0;
   const foodPaid = food?.amountPaid ?? 0;
-  const totalBill = Math.max(0, room.totalBill + foodTotal);
+  const taxAmount = roundMoney(room.taxAmount + (food?.taxAmount ?? 0));
+  const totalBill = Math.max(0, room.totalBill + (food?.totalBill ?? 0));
   const amountPaid = Math.max(0, room.amountPaid + foodPaid);
   const split = paymentFromSplit(totalBill, amountPaid);
 
@@ -229,6 +298,9 @@ export function buildOverallInvoice(
     foodLines: food?.foodLines ?? [],
     foodTotal,
     extraCharges: room.otherExtras + foodTotal,
+    taxAmount,
+    taxPercent: food?.taxPercent || room.taxPercent,
+    taxLabel: room.taxLabel || food?.taxLabel || "",
     totalBill,
     amountPaid: split.amountPaid,
     balanceDue: split.balanceDue,

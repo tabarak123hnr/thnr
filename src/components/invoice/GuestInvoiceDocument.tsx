@@ -223,12 +223,27 @@ export const GuestInvoiceDocument = forwardRef<
                     {fmtMoney(invoice.roomChargesBefore || invoice.roomCharges, rs)}
                   </td>
                 </tr>
+                {invoice.taxAmount > 0 && !showFood ? (
+                  <tr>
+                    <td style={tdLeft}>
+                      {invoice.taxLabel || "GST"}
+                      <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
+                        {invoice.taxPercent}% sales tax
+                      </span>
+                    </td>
+                    <td style={tdCenter}>1</td>
+                    <td style={tdRight}>{fmtMoney(invoice.taxAmount, rs)}</td>
+                    <td style={{ ...tdRight, fontWeight: 700 }}>
+                      {fmtMoney(invoice.taxAmount, rs)}
+                    </td>
+                  </tr>
+                ) : null}
                 {invoice.discountPercent > 0 && invoice.discountAmount > 0 ? (
                   <tr>
                     <td style={tdLeft}>
                       Discount
                       <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
-                        {invoice.discountPercent}% off room ·{" "}
+                        {invoice.discountPercent}% off room (after GST) ·{" "}
                         {fmtMoney(invoice.discountedNightlyRate, rs)} / night
                       </span>
                     </td>
@@ -266,6 +281,21 @@ export const GuestInvoiceDocument = forwardRef<
                   </tr>
                 ))
               : null}
+            {!showRoom && showFood && invoice.taxAmount > 0 ? (
+              <tr>
+                <td style={tdLeft}>
+                  {invoice.taxLabel || "GST"}
+                  <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
+                    {invoice.taxPercent}% sales tax on food
+                  </span>
+                </td>
+                <td style={tdCenter}>1</td>
+                <td style={tdRight}>{fmtMoney(invoice.taxAmount, rs)}</td>
+                <td style={{ ...tdRight, fontWeight: 700 }}>
+                  {fmtMoney(invoice.taxAmount, rs)}
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
 
@@ -288,6 +318,14 @@ export const GuestInvoiceDocument = forwardRef<
                     {fmtMoney(invoice.roomChargesBefore || invoice.roomCharges, rs)}
                   </span>
                 </div>
+                {invoice.taxAmount > 0 && showRoom && !showFood ? (
+                  <div style={totalRow}>
+                    <span style={{ color: MUTED }}>
+                      {invoice.taxLabel || "GST"} ({invoice.taxPercent}%)
+                    </span>
+                    <span>{fmtMoney(invoice.taxAmount, rs)}</span>
+                  </div>
+                ) : null}
                 {invoice.discountPercent > 0 && invoice.discountAmount > 0 ? (
                   <div style={totalRow}>
                     <span style={{ color: MUTED }}>
@@ -312,6 +350,14 @@ export const GuestInvoiceDocument = forwardRef<
               <div style={totalRow}>
                 <span style={{ color: MUTED }}>Food</span>
                 <span>{fmtMoney(invoice.foodTotal, rs)}</span>
+              </div>
+            ) : null}
+            {invoice.taxAmount > 0 && (showFood || (showRoom && showFood)) ? (
+              <div style={totalRow}>
+                <span style={{ color: MUTED }}>
+                  {invoice.taxLabel || "GST"} ({invoice.taxPercent}%)
+                </span>
+                <span>{fmtMoney(invoice.taxAmount, rs)}</span>
               </div>
             ) : null}
             <div style={{ ...totalRow, fontWeight: 700 }}>
@@ -426,7 +472,7 @@ export const GuestInvoiceDocument = forwardRef<
                 color: MUTED,
               }}
             >
-              Owner signature
+              Signature of entity
             </p>
           </div>
         </div>

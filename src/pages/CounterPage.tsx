@@ -4,13 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { FancySelect, SelectField } from "../components/ui/FancySelect";
-import { Field, PageHeader, TextArea } from "../components/ui/Page";
+import { Field, Input, PageHeader, TextArea } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
+import { roundMoney } from "../lib/billing";
 import { cn, formatRs } from "../lib/utils";
 import { subscribeCheckIns, type CheckInRecord } from "../services/checkIns";
 import { subscribeMenuItems, type MenuItem } from "../services/menu";
 import { createFoodOrder, subscribeOrders } from "../services/orders";
+import { subscribeTaxRates, type TaxRate } from "../services/taxRates";
 import { calcOrderAmount, type FoodOrderPaymentStatus } from "../types/order";
 import { MENU_CATEGORIES } from "../types/menu";
 
@@ -28,12 +30,16 @@ export function CounterPage() {
 
   const [catalog, setCatalog] = useState<MenuItem[]>([]);
   const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
+  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [category, setCategory] = useState<string>("all");
   const [checkInId, setCheckInId] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [notes, setNotes] = useState("");
   const [paymentStatus, setPaymentStatus] = useState<FoodOrderPaymentStatus>("due");
+  /** "none" | "custom" | tax rate id */
+  const [taxSelect, setTaxSelect] = useState("none");
+  const [customTaxPercent, setCustomTaxPercent] = useState("");
   const [search, setSearch] = useState("");
   const [placing, setPlacing] = useState(false);
   const [placeError, setPlaceError] = useState<string | null>(null);
@@ -44,10 +50,12 @@ export function CounterPage() {
     const c = subscribeOrders((orders) => {
       setPendingCount(orders.filter((o) => o.status === "pending").length);
     });
+    const d = subscribeTaxRates(setTaxRates);
     return () => {
       a();
       b();
       c();
+      d();
     };
   }, []);
 
@@ -57,6 +65,26 @@ export function CounterPage() {
   );
 
   const selectedStay = inHouse.find((c) => c.id === checkInId);
+
+  useEffect(() => {
+    if (!selectedStay) {
+      setTaxSelect("none");
+      setCustomTaxPercent("");
+      return;
+    }
+    if (selectedStay.taxPercent > 0 && selectedStay.taxAppliesToFood) {
+      if (selectedStay.taxRateId && taxRates.some((t) => t.id === selectedStay.taxRateId)) {
+        setTaxSelect(selectedStay.taxRateId);
+        setCustomTaxPercent("");
+      } else {
+        setTaxSelect("custom");
+        setCustomTaxPercent(String(selectedStay.taxPercent));
+      }
+    } else {
+      setTaxSelect("none");
+      setCustomTaxPercent("");
+    }
+  }, [selectedStay?.id, selectedStay?.taxPercent, selectedStay?.taxAppliesToFood, selectedStay?.taxRateId, taxRates]);
 
   const roomOptions = useMemo(
     () =>
@@ -88,7 +116,25 @@ export function CounterPage() {
     });
   }, [available, category, search]);
 
-  const total = calcOrderAmount(cart);
+  const subtotal = calcOrderAmount(cart);
+  const selectedTax =
+    taxSelect !== "none" && taxSelect !== "custom"
+      ? taxRates.find((r) => r.id === taxSelect)
+      : null;
+  const taxPercent =
+    taxSelect === "none"
+      ? 0
+      : taxSelect === "custom"
+        ? Math.max(0, Math.min(100, Number(customTaxPercent) || 0))
+        : (selectedTax?.percent ?? 0);
+  const taxLabel =
+    taxSelect === "custom"
+      ? `GST ${taxPercent}%`
+      : selectedTax
+        ? selectedTax.name
+        : "";
+  const taxAmount = taxPercent > 0 ? roundMoney((subtotal * taxPercent) / 100) : 0;
+  const total = roundMoney(subtotal + taxAmount);
   const itemCount = cart.reduce((s, l) => s + l.qty, 0);
 
   function addItem(item: MenuItem) {
@@ -148,6 +194,9 @@ export function CounterPage() {
         items: cart,
         notes,
         paymentStatus,
+        taxPercent,
+        taxLabel,
+        taxRateId: selectedTax?.id ?? null,
       });
       toastSuccess(
         "Sent to kitchen",
@@ -437,6 +486,44 @@ export function CounterPage() {
             </div>
           </div>
 
+          <SelectField label="Sales tax / GST" className="mt-4">
+            <FancySelect
+              value={taxSelect}
+              onChange={(value) => {
+                setTaxSelect(value);
+                if (value !== "custom") setCustomTaxPercent("");
+              }}
+              options={[
+                { value: "none", label: "No tax", description: "Food without GST." },
+                ...taxRates
+                  .filter((r) => r.active)
+                  .map((r) => ({
+                    value: r.id,
+                    label: `${r.name} (${r.percent}%)`,
+                    description: `${r.percent}% on this ticket`,
+                  })),
+                {
+                  value: "custom",
+                  label: "Custom %",
+                  description: "Enter a one-off GST percentage.",
+                },
+              ]}
+            />
+          </SelectField>
+          {taxSelect === "custom" ? (
+            <Field label="Custom GST %" className="mt-3">
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                step="0.01"
+                value={customTaxPercent}
+                onChange={(e) => setCustomTaxPercent(e.target.value)}
+                placeholder="e.g. 18"
+              />
+            </Field>
+          ) : null}
+
           {placeError ? (
             <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
               {placeError}
@@ -444,16 +531,34 @@ export function CounterPage() {
           ) : null}
 
           <div className="mt-4 border-t border-app pt-4">
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-muted">Ticket total</p>
-                <p className="text-2xl font-extrabold text-[var(--accent)]">
-                  {formatRs(total, t.common.rs)}
+            <div className="space-y-1">
+              {taxAmount > 0 ? (
+                <>
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-muted">Food subtotal</span>
+                    <span className="font-semibold">{formatRs(subtotal, t.common.rs)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-muted">
+                      {taxLabel || "GST"} ({taxPercent}%)
+                    </span>
+                    <span className="font-semibold">{formatRs(taxAmount, t.common.rs)}</span>
+                  </div>
+                </>
+              ) : null}
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted">
+                    Ticket total
+                  </p>
+                  <p className="text-2xl font-extrabold text-[var(--accent)]">
+                    {formatRs(total, t.common.rs)}
+                  </p>
+                </div>
+                <p className="pb-1 text-xs text-muted">
+                  {paymentStatus === "paid" ? "Paid at counter" : "Due on guest stay"}
                 </p>
               </div>
-              <p className="pb-1 text-xs text-muted">
-                {paymentStatus === "paid" ? "Paid at counter" : "Due on guest stay"}
-              </p>
             </div>
             <Button
               className="mt-4 w-full cursor-pointer justify-center"

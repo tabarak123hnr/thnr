@@ -8,7 +8,7 @@ import { Modal } from "../components/ui/Modal";
 import { PageHeader } from "../components/ui/Page";
 import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
-import { calcRoomBill } from "../lib/billing";
+import { calcRoomBill, taxOptionsFromStay } from "../lib/billing";
 import {
   isBillFullyPaid,
   paymentBadge,
@@ -42,6 +42,7 @@ function resolveBill(row: CheckInRecord, rooms: HotelRoom[]) {
     row.checkOutAt,
     row.extraCharges || 0,
     row.discountPercent || 0,
+    taxOptionsFromStay(row),
   );
   if (row.totalBill > 0 && row.nightlyRate > 0) {
     return {
@@ -52,6 +53,7 @@ function resolveBill(row: CheckInRecord, rooms: HotelRoom[]) {
       discountAmount: row.discountAmount || 0,
       roomCharges: row.roomCharges || computed.roomCharges,
       extraCharges: row.extraCharges || 0,
+      taxAmount: row.taxAmount || computed.taxAmount,
       totalBill: row.totalBill,
     };
   }

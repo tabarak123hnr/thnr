@@ -86,3 +86,18 @@ export async function clockOutEmployee(input: {
     updatedAt: serverTimestamp(),
   });
 }
+
+export async function updateAttendanceTimes(input: {
+  id: string;
+  clockInAt?: string;
+  clockOutAt?: string | null;
+}) {
+  if (!auth.currentUser) throw new Error("You must be signed in.");
+  const patch: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (input.clockInAt != null) patch.clockInAt = input.clockInAt;
+  if (input.clockOutAt !== undefined) {
+    patch.clockOutAt = input.clockOutAt;
+    patch.status = input.clockOutAt ? "clocked_out" : "clocked_in";
+  }
+  await updateDoc(doc(db, "attendance", input.id), patch);
+}
