@@ -10,7 +10,7 @@ import { Field, Input, PageHeader, TextArea } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
-import { calcCheckoutBill, calcRoomBill, clampDiscountPercent } from "../lib/billing";
+import { calcCheckoutBill, calcRoomBill, clampDiscountPercent, taxOptionsFromStay } from "../lib/billing";
 import { uploadImageToCloudinary } from "../lib/cloudinary";
 import {
   isGuestEmailConfigured,
@@ -36,6 +36,7 @@ import {
   type PaymentTiming,
 } from "../services/checkIns";
 import { subscribeRooms, type HotelRoom } from "../services/rooms";
+import { subscribeTaxRates, type TaxRate } from "../services/taxRates";
 import { confirmCurrentUserPassword } from "../services/userManagement";
 
 const PURPOSE_OPTIONS = [
@@ -153,6 +154,11 @@ function BillSummary({
   roomChargesBefore,
   roomCharges,
   extraCharges,
+  taxLabel,
+  taxPercent,
+  taxAmount,
+  taxAppliesToRoom,
+  taxAppliesToFood,
   totalBill,
   rs,
   paymentTiming,
@@ -166,6 +172,11 @@ function BillSummary({
   roomChargesBefore: number;
   roomCharges: number;
   extraCharges: number;
+  taxLabel?: string;
+  taxPercent?: number;
+  taxAmount?: number;
+  taxAppliesToRoom?: boolean;
+  taxAppliesToFood?: boolean;
   totalBill: number;
   rs: string;
   paymentTiming: PaymentTiming;
@@ -179,6 +190,7 @@ function BillSummary({
         : 0;
   const due = Math.max(0, totalBill - paid);
   const hasDiscount = discountPercent > 0 && discountAmount > 0;
+  const hasTax = (taxAmount ?? 0) > 0 && (taxPercent ?? 0) > 0;
 
   return (
     <div className="rounded-2xl border border-[color-mix(in_oklab,var(--accent)_40%,var(--border))] bg-accent-soft px-4 py-3">
@@ -187,32 +199,44 @@ function BillSummary({
         {nights} night{nights === 1 ? "" : "s"} × {formatRs(nightlyRate, rs)}
         {hasDiscount ? ` → ${formatRs(discountedNightlyRate, rs)} / night` : ""}
       </p>
-      {hasDiscount ? (
-        <div className="mt-2 space-y-0.5 text-sm">
+      <div className="mt-2 space-y-0.5 text-sm">
+        <p className="flex justify-between gap-3">
+          <span className="text-muted">Room subtotal</span>
+          <span className="font-semibold">
+            {formatRs(roomChargesBefore || roomCharges + discountAmount, rs)}
+          </span>
+        </p>
+        {extraCharges > 0 ? (
           <p className="flex justify-between gap-3">
-            <span className="text-muted">Room subtotal</span>
-            <span className="font-semibold">
-              {formatRs(roomChargesBefore || roomCharges + discountAmount, rs)}
-            </span>
+            <span className="text-muted">Extras / food</span>
+            <span className="font-semibold">{formatRs(extraCharges, rs)}</span>
           </p>
+        ) : null}
+        {hasTax ? (
           <p className="flex justify-between gap-3">
-            <span className="text-muted">Discount ({discountPercent}%)</span>
+            <span className="text-muted">
+              {taxLabel || "GST"} ({taxPercent}%)
+              {taxAppliesToRoom || taxAppliesToFood ? (
+                <span className="block text-xs font-normal opacity-80">
+                  {[
+                    taxAppliesToRoom ? "Room" : null,
+                    taxAppliesToFood ? "Food" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              ) : null}
+            </span>
+            <span className="font-semibold">{formatRs(taxAmount ?? 0, rs)}</span>
+          </p>
+        ) : null}
+        {hasDiscount ? (
+          <p className="flex justify-between gap-3">
+            <span className="text-muted">Discount ({discountPercent}% after GST)</span>
             <span className="font-semibold">−{formatRs(discountAmount, rs)}</span>
           </p>
-          <p className="flex justify-between gap-3">
-            <span className="text-muted">Room after discount</span>
-            <span className="font-semibold">{formatRs(roomCharges, rs)}</span>
-          </p>
-          {extraCharges > 0 ? (
-            <p className="flex justify-between gap-3">
-              <span className="text-muted">Extras</span>
-              <span className="font-semibold">{formatRs(extraCharges, rs)}</span>
-            </p>
-          ) : null}
-        </div>
-      ) : extraCharges > 0 ? (
-        <p className="mt-1 text-sm text-muted">Extras {formatRs(extraCharges, rs)}</p>
-      ) : null}
+        ) : null}
+      </div>
       <p className="mt-1 text-xl font-extrabold text-[var(--accent)]">
         {formatRs(totalBill, rs)}
       </p>
@@ -234,6 +258,53 @@ function BillSummary({
   );
 }
 
+function CashStatusCard({
+  paymentTiming,
+  totalBill,
+  amountPaidAtCheckIn,
+  rs,
+}: {
+  paymentTiming: PaymentTiming;
+  totalBill: number;
+  amountPaidAtCheckIn: number;
+  rs: string;
+}) {
+  const paid =
+    paymentTiming === "paid_at_checkin"
+      ? totalBill
+      : paymentTiming === "partial"
+        ? Math.min(totalBill, Math.max(0, amountPaidAtCheckIn))
+        : 0;
+  const due = Math.max(0, totalBill - paid);
+
+  const status =
+    paymentTiming === "paid_at_checkin" || (totalBill > 0 && due <= 0)
+      ? {
+          label: "Paid full",
+          tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200",
+          detail: "Entire bill collected at check-in.",
+        }
+      : paymentTiming === "partial" || paid > 0
+        ? {
+            label: "Partial",
+            tone: "border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-100",
+            detail: `${formatRs(paid, rs)} paid now · ${formatRs(due, rs)} still due.`,
+          }
+        : {
+            label: "Due",
+            tone: "border-rose-500/40 bg-rose-500/10 text-rose-900 dark:text-rose-100",
+            detail: `Full ${formatRs(totalBill, rs)} due on checkout.`,
+          };
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${status.tone}`}>
+      <p className="text-xs font-bold uppercase tracking-wide">Cash status</p>
+      <p className="mt-1 text-lg font-extrabold">{status.label}</p>
+      <p className="mt-0.5 text-sm opacity-90">{status.detail}</p>
+    </div>
+  );
+}
+
 export function CheckInPage() {
   const { t, language } = useApp();
   const { profile, user } = useAuth();
@@ -248,6 +319,7 @@ export function CheckInPage() {
 
   const [rooms, setRooms] = useState<HotelRoom[]>([]);
   const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
+  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [filter, setFilter] = useState<"all" | "checked_in" | "checked_out" | "cancelled">(
     "checked_in",
   );
@@ -277,15 +349,22 @@ export function CheckInPage() {
   const [nightlyRate, setNightlyRate] = useState(0);
   const [extraCharges, setExtraCharges] = useState(0);
   const [discountPercent, setDiscountPercent] = useState("");
+  /** "none" | "custom" | tax rate id */
+  const [taxSelect, setTaxSelect] = useState("none");
+  const [customTaxPercent, setCustomTaxPercent] = useState("");
+  const [taxAppliesToRoom, setTaxAppliesToRoom] = useState(true);
+  const [taxAppliesToFood, setTaxAppliesToFood] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubRooms = subscribeRooms(setRooms);
     const unsubCheckIns = subscribeCheckIns(setCheckIns);
+    const unsubTax = subscribeTaxRates(setTaxRates);
     return () => {
       unsubRooms();
       unsubCheckIns();
+      unsubTax();
     };
   }, []);
 
@@ -317,31 +396,84 @@ export function CheckInPage() {
   const liveBill = useMemo(() => {
     const rate = nightlyRate || selectedRoom?.rate || 0;
     const pct = clampDiscountPercent(discountPercent);
+    const selectedTax =
+      taxSelect !== "none" && taxSelect !== "custom"
+        ? taxRates.find((t) => t.id === taxSelect)
+        : null;
+    const taxPercent =
+      taxSelect === "none"
+        ? 0
+        : taxSelect === "custom"
+          ? Math.max(0, Math.min(100, Number(customTaxPercent) || 0))
+          : (selectedTax?.percent ?? 0);
+    const taxLabel =
+      taxSelect === "custom"
+        ? `GST ${taxPercent}%`
+        : selectedTax
+          ? selectedTax.name
+          : "";
+    const taxOpts = {
+      taxPercent,
+      taxAppliesToRoom: taxSelect === "none" ? true : taxAppliesToRoom,
+      taxAppliesToFood: taxSelect === "none" ? true : taxAppliesToFood,
+    };
+
+    const empty = {
+      nights: 0,
+      nightlyRate: rate,
+      discountedNightlyRate: rate,
+      discountPercent: pct,
+      discountAmount: 0,
+      roomChargesBefore: 0,
+      roomCharges: 0,
+      extraCharges,
+      subtotal: extraCharges,
+      taxPercent,
+      taxAppliesToRoom: taxOpts.taxAppliesToRoom,
+      taxAppliesToFood: taxOpts.taxAppliesToFood,
+      taxAmount: 0,
+      taxLabel,
+      taxRateId: selectedTax?.id ?? null,
+      totalBill: extraCharges,
+    };
+
     if (!form.checkInAt || !form.checkOutAt || !rate) {
-      return {
-        nights: 0,
-        nightlyRate: rate,
-        discountedNightlyRate: rate,
-        discountPercent: pct,
-        discountAmount: 0,
-        roomChargesBefore: 0,
-        roomCharges: 0,
-        extraCharges,
-        totalBill: extraCharges,
-      };
+      return empty;
     }
     try {
-      return calcRoomBill(
+      const bill = calcRoomBill(
         rate,
         new Date(form.checkInAt).toISOString(),
         new Date(form.checkOutAt).toISOString(),
         extraCharges,
         pct,
+        taxOpts,
       );
+      return { ...bill, taxLabel, taxRateId: selectedTax?.id ?? null };
     } catch {
-      return calcRoomBill(rate, new Date(), new Date(Date.now() + 86_400_000), extraCharges, pct);
+      const bill = calcRoomBill(
+        rate,
+        new Date(),
+        new Date(Date.now() + 86_400_000),
+        extraCharges,
+        pct,
+        taxOpts,
+      );
+      return { ...bill, taxLabel, taxRateId: selectedTax?.id ?? null };
     }
-  }, [form.checkInAt, form.checkOutAt, nightlyRate, selectedRoom?.rate, extraCharges, discountPercent]);
+  }, [
+    form.checkInAt,
+    form.checkOutAt,
+    nightlyRate,
+    selectedRoom?.rate,
+    extraCharges,
+    discountPercent,
+    taxSelect,
+    customTaxPercent,
+    taxAppliesToRoom,
+    taxAppliesToFood,
+    taxRates,
+  ]);
 
   const partySize = Math.max(1, Number(form.adults || 1) + Number(form.children || 0));
   const showCompanions = partySize > 1;
@@ -365,6 +497,10 @@ export function CheckInPage() {
     setNightlyRate(0);
     setExtraCharges(0);
     setDiscountPercent("");
+    setTaxSelect("none");
+    setCustomTaxPercent("");
+    setTaxAppliesToRoom(true);
+    setTaxAppliesToFood(true);
     setFormError(null);
     setEditingId(null);
     setLockedRoomId(null);
@@ -409,6 +545,10 @@ export function CheckInPage() {
     setNightlyRate(room.rate);
     setExtraCharges(0);
     setDiscountPercent("");
+    setTaxSelect("none");
+    setCustomTaxPercent("");
+    setTaxAppliesToRoom(true);
+    setTaxAppliesToFood(true);
     setFormError(null);
     setEditingId(null);
     setLockedRoomId(room.id);
@@ -462,6 +602,18 @@ export function CheckInPage() {
     setNightlyRate(row.nightlyRate || rooms.find((r) => r.id === row.roomId)?.rate || 0);
     setExtraCharges(row.extraCharges || 0);
     setDiscountPercent(row.discountPercent ? String(row.discountPercent) : "");
+    if (row.taxRateId && taxRates.some((t) => t.id === row.taxRateId)) {
+      setTaxSelect(row.taxRateId);
+      setCustomTaxPercent("");
+    } else if (row.taxPercent > 0) {
+      setTaxSelect("custom");
+      setCustomTaxPercent(String(row.taxPercent));
+    } else {
+      setTaxSelect("none");
+      setCustomTaxPercent("");
+    }
+    setTaxAppliesToRoom(row.taxAppliesToRoom !== false);
+    setTaxAppliesToFood(row.taxAppliesToFood !== false);
     setExistingCnicFrontUrl(row.cnicFrontImageUrl || row.cnicImageUrl);
     setExistingCnicBackUrl(row.cnicBackImageUrl);
     setFormError(null);
@@ -511,6 +663,7 @@ export function CheckInPage() {
       new Date().toISOString(),
       pendingEdit.extraCharges || 0,
       pendingEdit.discountPercent || 0,
+      taxOptionsFromStay(pendingEdit),
     );
   }, [pendingEdit, secureAction]);
 
@@ -711,6 +864,11 @@ export function CheckInPage() {
       }
     }
 
+    if (taxSelect !== "none" && !taxAppliesToRoom && !taxAppliesToFood) {
+      setFormError("Turn on GST for room, food, or both.");
+      return;
+    }
+
     setSaving(true);
     setFormError(null);
     try {
@@ -766,6 +924,11 @@ export function CheckInPage() {
           cnicImageUrl: cnicFrontUrl ?? null,
           paymentTiming: form.paymentTiming,
           amountPaidAtCheckIn: paidNow,
+          taxRateId: liveBill.taxRateId,
+          taxLabel: liveBill.taxLabel,
+          taxPercent: liveBill.taxPercent,
+          taxAppliesToRoom: liveBill.taxAppliesToRoom,
+          taxAppliesToFood: liveBill.taxAppliesToFood,
         });
         toastSuccess("Check-in updated", `Bill is now ${formatRs(liveBill.totalBill, t.common.rs)}`);
       } else {
@@ -795,6 +958,11 @@ export function CheckInPage() {
           discountPercent: clampDiscountPercent(discountPercent),
           paymentTiming: form.paymentTiming,
           amountPaidAtCheckIn: paidNow,
+          taxRateId: liveBill.taxRateId,
+          taxLabel: liveBill.taxLabel,
+          taxPercent: liveBill.taxPercent,
+          taxAppliesToRoom: liveBill.taxAppliesToRoom,
+          taxAppliesToFood: liveBill.taxAppliesToFood,
         });
 
         const splitPaid =
@@ -1101,24 +1269,54 @@ export function CheckInPage() {
                 value={formatRs(resolveBalanceDue(viewRow), t.common.rs)}
               />
             </div>
-            <BillSummary
-              nights={viewRow.nights || stayFallbackNights(viewRow)}
-              nightlyRate={viewRow.nightlyRate}
-              discountedNightlyRate={
-                viewRow.discountedNightlyRate || viewRow.nightlyRate
-              }
-              discountPercent={viewRow.discountPercent || 0}
-              discountAmount={viewRow.discountAmount || 0}
-              roomChargesBefore={
-                viewRow.roomCharges + (viewRow.discountAmount || 0)
-              }
-              roomCharges={viewRow.roomCharges}
-              extraCharges={viewRow.extraCharges || 0}
-              totalBill={viewRow.totalBill}
-              rs={t.common.rs}
-              paymentTiming={viewRow.paymentTiming}
-              amountPaidAtCheckIn={resolveAmountPaid(viewRow)}
-            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(() => {
+                const viewBill = calcRoomBill(
+                  viewRow.nightlyRate,
+                  viewRow.checkInAt,
+                  viewRow.checkOutAt,
+                  viewRow.extraCharges || 0,
+                  viewRow.discountPercent || 0,
+                  taxOptionsFromStay(viewRow),
+                );
+                return (
+                  <>
+                    <BillSummary
+                      nights={viewRow.nights || viewBill.nights}
+                      nightlyRate={viewRow.nightlyRate}
+                      discountedNightlyRate={
+                        viewRow.discountedNightlyRate || viewBill.discountedNightlyRate
+                      }
+                      discountPercent={viewRow.discountPercent || 0}
+                      discountAmount={viewRow.discountAmount || viewBill.discountAmount}
+                      roomChargesBefore={viewBill.roomChargesBefore}
+                      roomCharges={viewRow.roomCharges || viewBill.roomCharges}
+                      extraCharges={viewRow.extraCharges || 0}
+                      taxLabel={
+                        viewRow.taxLabel ||
+                        (viewBill.taxPercent > 0
+                          ? `GST ${viewRow.taxPercent || viewBill.taxPercent}%`
+                          : "")
+                      }
+                      taxPercent={viewRow.taxPercent || viewBill.taxPercent}
+                      taxAmount={viewRow.taxAmount || viewBill.taxAmount}
+                      taxAppliesToRoom={viewRow.taxAppliesToRoom !== false}
+                      taxAppliesToFood={viewRow.taxAppliesToFood !== false}
+                      totalBill={viewRow.totalBill || viewBill.totalBill}
+                      rs={t.common.rs}
+                      paymentTiming={viewRow.paymentTiming}
+                      amountPaidAtCheckIn={resolveAmountPaid(viewRow)}
+                    />
+                    <CashStatusCard
+                      paymentTiming={viewRow.paymentTiming}
+                      totalBill={viewRow.totalBill || viewBill.totalBill}
+                      amountPaidAtCheckIn={resolveAmountPaid(viewRow)}
+                      rs={t.common.rs}
+                    />
+                  </>
+                );
+              })()}
+            </div>
             {viewRow.companions.length > 0 ? (
               <div>
                 <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Companions</p>
@@ -1280,6 +1478,12 @@ export function CheckInPage() {
                   Room discount {checkoutPreview.discountPercent}% (
                   −{formatRs(checkoutPreview.discountAmount, t.common.rs)}) is
                   included.
+                </p>
+              ) : null}
+              {checkoutPreview.taxAmount > 0 ? (
+                <p className="mt-1 text-xs text-muted">
+                  GST {checkoutPreview.taxPercent}% (
+                  {formatRs(checkoutPreview.taxAmount, t.common.rs)}) is included.
                 </p>
               ) : null}
               <p className="mt-2 text-xs text-muted">
@@ -1504,9 +1708,87 @@ export function CheckInPage() {
                   placeholder="0"
                 />
                 <p className="mt-1 text-xs text-muted">
-                  Off the room rate only — food extras stay at full price.
+                  Applied after GST on the room side — food extras stay full price.
                 </p>
               </Field>
+              <SelectField label="Sales tax / GST" className="sm:col-span-2">
+                <FancySelect
+                  value={taxSelect}
+                  onChange={(value) => {
+                    setTaxSelect(value);
+                    if (value === "none") {
+                      setCustomTaxPercent("");
+                      setTaxAppliesToRoom(true);
+                      setTaxAppliesToFood(true);
+                      return;
+                    }
+                    if (value === "custom") {
+                      setTaxAppliesToRoom(true);
+                      setTaxAppliesToFood(true);
+                      return;
+                    }
+                    setCustomTaxPercent("");
+                    setTaxAppliesToRoom(true);
+                    setTaxAppliesToFood(true);
+                  }}
+                  options={[
+                    { value: "none", label: "No tax", description: "Bill without GST." },
+                    ...taxRates
+                      .filter((t) => t.active)
+                      .map((t) => ({
+                        value: t.id,
+                        label: `${t.name} (${t.percent}%)`,
+                        description: `${t.percent}% sales tax`,
+                      })),
+                    {
+                      value: "custom",
+                      label: "Custom %",
+                      description: "Enter a one-off GST percentage.",
+                    },
+                  ]}
+                />
+              </SelectField>
+              {taxSelect === "custom" ? (
+                <Field label="Custom GST %" className="sm:col-span-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    value={customTaxPercent}
+                    onChange={(e) => setCustomTaxPercent(e.target.value)}
+                    placeholder="e.g. 18"
+                  />
+                </Field>
+              ) : null}
+              {taxSelect !== "none" ? (
+                <div className="sm:col-span-2 rounded-xl border border-app bg-app px-3 py-3">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
+                    Apply GST to
+                  </p>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <input
+                        type="checkbox"
+                        checked={taxAppliesToRoom}
+                        onChange={(e) => setTaxAppliesToRoom(e.target.checked)}
+                      />
+                      Room charges
+                    </label>
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <input
+                        type="checkbox"
+                        checked={taxAppliesToFood}
+                        onChange={(e) => setTaxAppliesToFood(e.target.checked)}
+                      />
+                      Food / extras
+                    </label>
+                  </div>
+                  <p className="mt-2 text-xs text-muted">
+                    Tick both if GST should apply to room and food orders on this stay.
+                  </p>
+                </div>
+              ) : null}
               <SelectField label="Room payment" className="sm:col-span-2">
                 <FancySelect
                   value={form.paymentTiming}
@@ -1547,20 +1829,33 @@ export function CheckInPage() {
           </div>
 
           {liveBill.nightlyRate > 0 ? (
-            <BillSummary
-              nights={liveBill.nights}
-              nightlyRate={liveBill.nightlyRate}
-              discountedNightlyRate={liveBill.discountedNightlyRate}
-              discountPercent={liveBill.discountPercent}
-              discountAmount={liveBill.discountAmount}
-              roomChargesBefore={liveBill.roomChargesBefore}
-              roomCharges={liveBill.roomCharges}
-              extraCharges={liveBill.extraCharges}
-              totalBill={liveBill.totalBill}
-              rs={t.common.rs}
-              paymentTiming={form.paymentTiming}
-              amountPaidAtCheckIn={Number(form.amountPaidAtCheckIn) || 0}
-            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <BillSummary
+                nights={liveBill.nights}
+                nightlyRate={liveBill.nightlyRate}
+                discountedNightlyRate={liveBill.discountedNightlyRate}
+                discountPercent={liveBill.discountPercent}
+                discountAmount={liveBill.discountAmount}
+                roomChargesBefore={liveBill.roomChargesBefore}
+                roomCharges={liveBill.roomCharges}
+                extraCharges={liveBill.extraCharges}
+                taxLabel={liveBill.taxLabel}
+                taxPercent={liveBill.taxPercent}
+                taxAmount={liveBill.taxAmount}
+                taxAppliesToRoom={liveBill.taxAppliesToRoom}
+                taxAppliesToFood={liveBill.taxAppliesToFood}
+                totalBill={liveBill.totalBill}
+                rs={t.common.rs}
+                paymentTiming={form.paymentTiming}
+                amountPaidAtCheckIn={Number(form.amountPaidAtCheckIn) || 0}
+              />
+              <CashStatusCard
+                paymentTiming={form.paymentTiming}
+                totalBill={liveBill.totalBill}
+                amountPaidAtCheckIn={Number(form.amountPaidAtCheckIn) || 0}
+                rs={t.common.rs}
+              />
+            </div>
           ) : (
             <p className="rounded-xl bg-app px-3 py-2 text-sm text-muted">
               Select a room to see the bill for this stay.
@@ -1726,11 +2021,6 @@ export function CheckInPage() {
       </Modal>
     </div>
   );
-}
-
-function stayFallbackNights(row: CheckInRecord) {
-  if (row.nights) return row.nights;
-  return calcRoomBill(row.nightlyRate || 0, row.checkInAt, row.checkOutAt).nights;
 }
 
 function CnicUploadSlot({

@@ -16,6 +16,7 @@ import {
   subscribeOrders,
   type FoodOrder,
 } from "../services/orders";
+import { orderTaxAmount, orderTicketTotal } from "../types/order";
 
 function createdAtMs(value: unknown): number {
   if (!value) return 0;
@@ -87,10 +88,10 @@ export function OrdersPage() {
       .sort((a, b) => createdAtMs(a.createdAt) - createdAtMs(b.createdAt));
   }, [orders, nowTick]);
 
-  const pendingAmount = active.reduce((s, o) => s + o.amount, 0);
+  const pendingAmount = active.reduce((s, o) => s + orderTicketTotal(o), 0);
   const dueAmount = active
     .filter((o) => o.paymentStatus === "due")
-    .reduce((s, o) => s + o.amount, 0);
+    .reduce((s, o) => s + orderTicketTotal(o), 0);
   const urgentCount = active.filter((o) => waitMinutes(o.createdAt) >= 12).length;
   const roomsWaiting = new Set(active.map((o) => o.roomNumber)).size;
 
@@ -115,7 +116,7 @@ export function OrdersPage() {
     setActingId(row.id);
     try {
       await markOrderPayment(row.id, "paid");
-      toastSuccess("Marked paid", `${row.token} · ${formatRs(row.amount, t.common.rs)}`);
+      toastSuccess("Marked paid", `${row.token} · ${formatRs(orderTicketTotal(row), t.common.rs)}`);
     } catch (err) {
       toastError(
         "Could not update payment",
@@ -247,9 +248,28 @@ export function OrdersPage() {
                   </p>
                 ) : null}
 
-                <div className="mt-4 flex items-center justify-between gap-2">
-                  <p className="text-lg font-extrabold">{formatRs(row.amount, t.common.rs)}</p>
-                  <p className="text-[11px] text-muted">{formatWhen(row.createdAt)}</p>
+                <div className="mt-4 space-y-1">
+                  {orderTaxAmount(row) > 0 ? (
+                    <>
+                      <div className="flex items-center justify-between gap-2 text-xs text-muted">
+                        <span>Food</span>
+                        <span>{formatRs(row.amount, t.common.rs)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-xs text-muted">
+                        <span>
+                          GST
+                          {(row.taxPercent || 0) > 0 ? ` (${row.taxPercent}%)` : ""}
+                        </span>
+                        <span>{formatRs(orderTaxAmount(row), t.common.rs)}</span>
+                      </div>
+                    </>
+                  ) : null}
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-lg font-extrabold">
+                      {formatRs(orderTicketTotal(row), t.common.rs)}
+                    </p>
+                    <p className="text-[11px] text-muted">{formatWhen(row.createdAt)}</p>
+                  </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -334,7 +354,17 @@ export function OrdersPage() {
           <div className="space-y-4">
             <div className="grid gap-2 sm:grid-cols-2">
               <Detail label="Wait time" value={formatWaitLabel(waitMinutes(viewRow.createdAt))} />
-              <Detail label="Amount" value={formatRs(viewRow.amount, t.common.rs)} />
+              <Detail label="Food" value={formatRs(viewRow.amount, t.common.rs)} />
+              {orderTaxAmount(viewRow) > 0 ? (
+                <Detail
+                  label={`GST${viewRow.taxPercent ? ` (${viewRow.taxPercent}%)` : ""}`}
+                  value={formatRs(orderTaxAmount(viewRow), t.common.rs)}
+                />
+              ) : null}
+              <Detail
+                label="Ticket total"
+                value={formatRs(orderTicketTotal(viewRow), t.common.rs)}
+              />
               <Detail label="Placed" value={formatWhen(viewRow.createdAt)} />
               <Detail
                 label="Payment"
@@ -373,7 +403,7 @@ export function OrdersPage() {
         title="Delete order?"
         subtitle={
           deleteRow
-            ? `${deleteRow.token} · ${formatRs(deleteRow.amount, t.common.rs)} will be removed from Room ${deleteRow.roomNumber}’s bill.`
+            ? `${deleteRow.token} · ${formatRs(orderTicketTotal(deleteRow), t.common.rs)} will be removed from Room ${deleteRow.roomNumber}’s bill.`
             : undefined
         }
         footer={

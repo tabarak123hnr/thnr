@@ -1,11 +1,11 @@
-/** Operating vs general & administrative ledgers. */
+/** Operating vs operating & admin ledgers. */
 export const EXPENSE_KINDS = ["operating", "ga"] as const;
 
 export type ExpenseKind = (typeof EXPENSE_KINDS)[number];
 
 export const EXPENSE_KIND_LABELS: Record<ExpenseKind, string> = {
   operating: "Expense",
-  ga: "General & administrative",
+  ga: "Operating and admin expense",
 };
 
 /** Operating expense / expenditure categories for hotel & restaurant. */

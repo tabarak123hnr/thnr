@@ -21,36 +21,74 @@ export function clampDiscountPercent(value: unknown) {
   return Math.min(100, roundMoney(n));
 }
 
+export type BillTaxOptions = {
+  taxPercent?: number;
+  taxAppliesToRoom?: boolean;
+  taxAppliesToFood?: boolean;
+};
+
 export type RoomBill = {
   nights: number;
   /** Rack / list rate before discount */
   nightlyRate: number;
   discountedNightlyRate: number;
   discountPercent: number;
+  /** Discount money — applied AFTER GST on the room side */
   discountAmount: number;
   roomChargesBefore: number;
-  /** Room total after discount */
+  /** Room total after discount (excludes GST) */
   roomCharges: number;
   extraCharges: number;
+  subtotal: number;
+  taxPercent: number;
+  taxAppliesToRoom: boolean;
+  taxAppliesToFood: boolean;
+  taxAmount: number;
+  /** subtotal + tax − discount */
   totalBill: number;
 };
 
+/**
+ * Bill chain:
+ * 1) Room + extras
+ * 2) GST on room and/or food bases
+ * 3) Room discount % applied after GST (on room + room tax)
+ */
 export function calcRoomBill(
   nightlyRate: number,
   checkInAt: string | Date,
   checkOutAt: string | Date,
   extraCharges = 0,
   discountPercent = 0,
+  tax?: BillTaxOptions,
 ): RoomBill {
   const rate = Math.max(0, Number(nightlyRate) || 0);
   const nights = stayNights(checkInAt, checkOutAt);
-  const pct = clampDiscountPercent(discountPercent);
   const roomChargesBefore = roundMoney(rate * nights);
-  const discountAmount = roundMoney(roomChargesBefore * (pct / 100));
-  const roomCharges = roundMoney(roomChargesBefore - discountAmount);
+  const extras = Math.max(0, roundMoney(Number(extraCharges) || 0));
+
+  const taxPercent = Math.max(0, Math.min(100, Number(tax?.taxPercent) || 0));
+  const taxAppliesToRoom = tax?.taxAppliesToRoom !== false;
+  const taxAppliesToFood = tax?.taxAppliesToFood !== false;
+
+  const roomTax = taxAppliesToRoom
+    ? roundMoney((roomChargesBefore * taxPercent) / 100)
+    : 0;
+  const foodTax = taxAppliesToFood ? roundMoney((extras * taxPercent) / 100) : 0;
+  const taxAmount = roundMoney(roomTax + foodTax);
+
+  const roomAfterTax = roundMoney(roomChargesBefore + roomTax);
+  const pct = clampDiscountPercent(discountPercent);
+  const discountAmount = roundMoney((roomAfterTax * pct) / 100);
+  const roomNetAfterDiscount = roundMoney(roomAfterTax - discountAmount);
+  /** Room line without tax (tax shown separately) */
+  const roomCharges = roundMoney(Math.max(0, roomNetAfterDiscount - roomTax));
   const discountedNightlyRate =
     nights > 0 ? roundMoney(roomCharges / nights) : roundMoney(rate * (1 - pct / 100));
-  const extras = Math.max(0, Number(extraCharges) || 0);
+
+  const subtotal = roundMoney(roomChargesBefore + extras);
+  const totalBill = roundMoney(subtotal + taxAmount - discountAmount);
+
   return {
     nights,
     nightlyRate: rate,
@@ -60,7 +98,12 @@ export function calcRoomBill(
     roomChargesBefore,
     roomCharges,
     extraCharges: extras,
-    totalBill: roundMoney(roomCharges + extras),
+    subtotal,
+    taxPercent,
+    taxAppliesToRoom,
+    taxAppliesToFood,
+    taxAmount,
+    totalBill,
   };
 }
 
@@ -72,6 +115,7 @@ export function calcCheckoutBill(
   actualCheckOutAt: string | Date,
   extraCharges = 0,
   discountPercent = 0,
+  tax?: BillTaxOptions,
 ) {
   const actual = calcRoomBill(
     nightlyRate,
@@ -79,6 +123,7 @@ export function calcCheckoutBill(
     actualCheckOutAt,
     extraCharges,
     discountPercent,
+    tax,
   );
   const planned = calcRoomBill(
     nightlyRate,
@@ -86,6 +131,7 @@ export function calcCheckoutBill(
     plannedCheckOutAt,
     extraCharges,
     discountPercent,
+    tax,
   );
   const early =
     new Date(actualCheckOutAt).getTime() < new Date(plannedCheckOutAt).getTime();
@@ -94,5 +140,17 @@ export function calcCheckoutBill(
     plannedNights: planned.nights,
     plannedTotal: planned.totalBill,
     early,
+  };
+}
+
+export function taxOptionsFromStay(data: {
+  taxPercent?: unknown;
+  taxAppliesToRoom?: unknown;
+  taxAppliesToFood?: unknown;
+}): BillTaxOptions {
+  return {
+    taxPercent: Number(data.taxPercent ?? 0) || 0,
+    taxAppliesToRoom: data.taxAppliesToRoom !== false,
+    taxAppliesToFood: data.taxAppliesToFood !== false,
   };
 }

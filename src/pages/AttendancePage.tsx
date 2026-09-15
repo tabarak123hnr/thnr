@@ -3,14 +3,19 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { Modal } from "../components/ui/Modal";
 import { Field, Input, PageHeader, StatCard } from "../components/ui/Page";
 import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
 import { todayIsoDate } from "../lib/dutyPerformance";
-import { subscribeAttendance, clockInEmployee, clockOutEmployee, type AttendanceRecord } from "../services/attendance";
+import {
+  subscribeAttendance,
+  clockInEmployee,
+  clockOutEmployee,
+  updateAttendanceTimes,
+  type AttendanceRecord,
+} from "../services/attendance";
 import { subscribeEmployees, type Employee } from "../services/employees";
 
 function formatClockTime(value: string) {
@@ -20,7 +25,6 @@ function formatClockTime(value: string) {
   return d.toLocaleTimeString(undefined, {
     hour: "numeric",
     minute: "2-digit",
-    second: "2-digit",
   });
 }
 
@@ -47,13 +51,35 @@ function formatDuration(fromIso: string, toIso: string | null, nowMs: number) {
   return `${hours}h ${mins}m`;
 }
 
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "?";
-  return parts
-    .slice(0, 2)
-    .map((p) => p[0]!.toUpperCase())
-    .join("");
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+/** HH:MM for `<input type="time">` from an ISO stamp */
+function isoToTimeInput(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Current local time as HH:MM */
+function nowTimeInput(now = new Date()) {
+  return `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+}
+
+/** Combine YYYY-MM-DD + HH:MM → ISO */
+function dateAndTimeToIso(date: string, time: string) {
+  const [hh = "0", mm = "0"] = time.split(":");
+  const d = new Date(
+    Number(date.slice(0, 4)),
+    Number(date.slice(5, 7)) - 1,
+    Number(date.slice(8, 10)),
+    Number(hh) || 0,
+    Number(mm) || 0,
+    0,
+    0,
+  );
+  return d.toISOString();
 }
 
 export function AttendancePage() {
@@ -70,13 +96,6 @@ export function AttendancePage() {
   const [logDate, setLogDate] = useState(todayIsoDate);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const [pending, setPending] = useState<{
-    action: "in" | "out";
-    employee: Employee;
-    openRecord?: AttendanceRecord;
-  } | null>(null);
-  const [note, setNote] = useState("");
-
   useEffect(() => {
     const a = subscribeEmployees(setEmployees);
     const b = subscribeAttendance(setRecords);
@@ -87,7 +106,7 @@ export function AttendancePage() {
   }, []);
 
   useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 1000);
+    const id = window.setInterval(() => setNow(new Date()), 30_000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -95,7 +114,10 @@ export function AttendancePage() {
   const nowMs = now.getTime();
 
   const activeEmployees = useMemo(
-    () => employees.filter((e) => e.status === "active"),
+    () =>
+      employees
+        .filter((e) => e.status === "active")
+        .sort((a, b) => a.name.localeCompare(b.name)),
     [employees],
   );
 
@@ -114,69 +136,115 @@ export function AttendancePage() {
     return map;
   }, [records]);
 
-  const board = useMemo(() => {
+  const dayRows = useMemo(() => {
     return activeEmployees.map((employee) => {
       const open = openByEmployee.get(employee.id) ?? null;
-      const todayRows = todaysRecords.filter((r) => r.employeeId === employee.id);
-      const lastToday = todayRows[0] ?? null;
-      return { employee, open, todayRows, lastToday };
+      const forDate = records.filter(
+        (r) => r.employeeId === employee.id && r.date === logDate,
+      );
+      // Prefer open shift if it belongs on this date (or still open today)
+      const openOnDate =
+        open && (open.date === logDate || (logDate === today && !open.clockOutAt))
+          ? open
+          : null;
+      const completed = forDate.find((r) => r.clockOutAt) ?? forDate[0] ?? null;
+      const record = openOnDate || completed;
+      return { employee, record, open: openOnDate };
     });
-  }, [activeEmployees, openByEmployee, todaysRecords]);
-
-  const logRows = useMemo(
-    () => records.filter((r) => r.date === logDate),
-    [records, logDate],
-  );
+  }, [activeEmployees, openByEmployee, records, logDate, today]);
 
   const stats = useMemo(() => {
-    const clockedIn = board.filter((row) => row.open).length;
+    const clockedIn = activeEmployees.filter((e) => openByEmployee.has(e.id)).length;
     const completed = todaysRecords.filter((r) => r.status === "clocked_out").length;
     const present = new Set(todaysRecords.map((r) => r.employeeId)).size;
     const absent = Math.max(0, activeEmployees.length - present);
     return { clockedIn, completed, present, absent };
-  }, [board, todaysRecords, activeEmployees.length]);
+  }, [activeEmployees, openByEmployee, todaysRecords]);
 
-  function openPunch(action: "in" | "out", employee: Employee, openRecord?: AttendanceRecord) {
-    setPending({ action, employee, openRecord });
-    setNote("");
+  async function handleClockIn(employee: Employee) {
+    if (openByEmployee.has(employee.id)) {
+      toastError("Already in", `${employee.name} is already clocked in.`);
+      return;
+    }
+    setBusyId(employee.id);
+    const stamp = dateAndTimeToIso(logDate, nowTimeInput(now));
+    try {
+      await clockInEmployee({
+        employeeId: employee.id,
+        employeeName: employee.name,
+        date: logDate,
+        clockInAt: stamp,
+        recordedBy,
+      });
+      toastSuccess("Clocked in", `${employee.name} · ${formatClockTime(stamp)}`);
+    } catch (err) {
+      toastError(
+        "Clock in failed",
+        err instanceof Error ? err.message : "Could not save.",
+      );
+    } finally {
+      setBusyId(null);
+    }
   }
 
-  async function confirmPunch() {
-    if (!pending) return;
-    setBusyId(pending.employee.id);
-    const stamp = new Date().toISOString();
+  async function handleClockOut(employee: Employee, open: AttendanceRecord) {
+    setBusyId(employee.id);
+    const stamp = dateAndTimeToIso(logDate, nowTimeInput(now));
     try {
-      if (pending.action === "in") {
-        if (openByEmployee.has(pending.employee.id)) {
-          throw new Error("This employee is already clocked in.");
-        }
-        await clockInEmployee({
-          employeeId: pending.employee.id,
-          employeeName: pending.employee.name,
-          date: todayIsoDate(new Date(stamp)),
-          clockInAt: stamp,
-          recordedBy,
-          notes: note,
-        });
-        toastSuccess(
-          "Clocked in",
-          `${pending.employee.name} · ${formatClockTime(stamp)}`,
-        );
-      } else {
-        if (!pending.openRecord) throw new Error("No open clock-in found.");
-        await clockOutEmployee({
-          id: pending.openRecord.id,
-          clockOutAt: stamp,
-        });
-        toastSuccess(
-          "Clocked out",
-          `${pending.employee.name} · ${formatClockTime(stamp)}`,
-        );
+      if (new Date(stamp).getTime() < new Date(open.clockInAt).getTime()) {
+        throw new Error("Clock-out time must be after clock-in.");
       }
-      setPending(null);
+      await clockOutEmployee({ id: open.id, clockOutAt: stamp });
+      toastSuccess("Clocked out", `${employee.name} · ${formatClockTime(stamp)}`);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not save attendance.";
-      toastError("Attendance failed", message);
+      toastError(
+        "Clock out failed",
+        err instanceof Error ? err.message : "Could not save.",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function saveClockInTime(record: AttendanceRecord, time: string) {
+    if (!time) return;
+    const next = dateAndTimeToIso(record.date || logDate, time);
+    if (isoToTimeInput(record.clockInAt) === time) return;
+    if (record.clockOutAt && new Date(next) > new Date(record.clockOutAt)) {
+      toastError("Invalid time", "Clock-in must be before clock-out.");
+      return;
+    }
+    setBusyId(record.employeeId);
+    try {
+      await updateAttendanceTimes({ id: record.id, clockInAt: next });
+      toastSuccess("Clock-in updated", formatClockTime(next));
+    } catch (err) {
+      toastError(
+        "Update failed",
+        err instanceof Error ? err.message : "Could not update time.",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function saveClockOutTime(record: AttendanceRecord, time: string) {
+    if (!time) return;
+    const next = dateAndTimeToIso(record.date || logDate, time);
+    if (record.clockOutAt && isoToTimeInput(record.clockOutAt) === time) return;
+    if (new Date(next) < new Date(record.clockInAt)) {
+      toastError("Invalid time", "Clock-out must be after clock-in.");
+      return;
+    }
+    setBusyId(record.employeeId);
+    try {
+      await updateAttendanceTimes({ id: record.id, clockOutAt: next });
+      toastSuccess("Clock-out updated", formatClockTime(next));
+    } catch (err) {
+      toastError(
+        "Update failed",
+        err instanceof Error ? err.message : "Could not update time.",
+      );
     } finally {
       setBusyId(null);
     }
@@ -186,7 +254,7 @@ export function AttendancePage() {
     <div>
       <PageHeader
         title={t.pages.attendanceTitle}
-        subtitle={t.pages.attendanceSub}
+        subtitle="Clock staff in and out from the list. Times default to now and can be edited."
         actions={
           <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-app bg-app px-4 py-3 sm:w-auto">
             <Clock className="h-5 w-5 text-[var(--accent)]" />
@@ -198,7 +266,6 @@ export function AttendancePage() {
                 {now.toLocaleTimeString(undefined, {
                   hour: "numeric",
                   minute: "2-digit",
-                  second: "2-digit",
                 })}
               </p>
             </div>
@@ -213,85 +280,14 @@ export function AttendancePage() {
         <StatCard label="No punch yet" value={String(stats.absent)} hint="Active staff not marked today" />
       </div>
 
-      {activeEmployees.length === 0 ? (
-        <Card>
-          <p className="text-sm text-muted">Add active employees first, then clock them in here.</p>
-        </Card>
-      ) : (
-        <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {board.map(({ employee, open, lastToday }) => {
-            const working = Boolean(open);
-            return (
-              <Card key={employee.id} className="flex flex-col gap-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-accent text-sm font-extrabold text-[var(--accent-text)]">
-                    {initials(employee.name)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-extrabold tracking-tight">{employee.name}</p>
-                    <p className="text-xs text-muted">
-                      {employee.designation || "Staff"} · {employee.shift}
-                    </p>
-                  </div>
-                  <Badge tone={working ? "success" : lastToday ? "gold" : "muted"}>
-                    {working ? "In" : lastToday ? "Out" : "Away"}
-                  </Badge>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="rounded-xl bg-app px-3 py-2">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted">
-                      Clock in
-                    </p>
-                    <p className="mt-0.5 font-semibold">
-                      {formatClockTime(open?.clockInAt || lastToday?.clockInAt || "")}
-                    </p>
-                  </div>
-                  <div className="rounded-xl bg-app px-3 py-2">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted">
-                      {working ? "Duration" : "Clock out"}
-                    </p>
-                    <p className="mt-0.5 font-semibold">
-                      {working
-                        ? formatDuration(open!.clockInAt, null, nowMs)
-                        : formatClockTime(lastToday?.clockOutAt || "")}
-                    </p>
-                  </div>
-                </div>
-
-                {working ? (
-                  <Button
-                    type="button"
-                    variant="gold"
-                    className="w-full"
-                    disabled={busyId === employee.id}
-                    icon={<LogOut className="h-4 w-4" />}
-                    onClick={() => openPunch("out", employee, open!)}
-                  >
-                    Clock out now
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    className="w-full"
-                    disabled={busyId === employee.id}
-                    icon={<LogIn className="h-4 w-4" />}
-                    onClick={() => openPunch("in", employee)}
-                  >
-                    Clock in now
-                  </Button>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-      )}
-
       <Card>
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-base font-bold tracking-tight">Attendance log</h2>
-            <p className="text-sm text-muted">Punches saved with the live clock time.</p>
+            <h2 className="text-base font-bold tracking-tight">Staff attendance</h2>
+            <p className="text-sm text-muted">
+              {activeEmployees.length} employee{activeEmployees.length === 1 ? "" : "s"} ·{" "}
+              {formatClockDate(logDate)}
+            </p>
           </div>
           <div className="w-full sm:w-44">
             <Field label="Date">
@@ -299,99 +295,96 @@ export function AttendancePage() {
             </Field>
           </div>
         </div>
-        <Table
-          headers={["Employee", "Clock in", "Clock out", "Duration", "By"]}
-          colWidths={["24%", "18%", "18%", "16%", "24%"]}
-        >
-          {logRows.length === 0 ? (
-            <Tr>
-              <Td className="text-muted" colSpan={5}>
-                No attendance for {formatClockDate(logDate)}.
-              </Td>
-            </Tr>
-          ) : (
-            logRows.map((row) => (
-              <Tr key={row.id}>
-                <Td className="font-semibold">{row.employeeName}</Td>
-                <Td>{formatClockTime(row.clockInAt)}</Td>
-                <Td>{row.clockOutAt ? formatClockTime(row.clockOutAt) : "—"}</Td>
-                <Td>{formatDuration(row.clockInAt, row.clockOutAt, nowMs)}</Td>
-                <Td className="text-muted">{row.recordedBy || "—"}</Td>
-              </Tr>
-            ))
-          )}
-        </Table>
-      </Card>
 
-      <Modal
-        open={Boolean(pending)}
-        onClose={() => {
-          if (busyId) return;
-          setPending(null);
-        }}
-        title={pending?.action === "out" ? "Clock out" : "Clock in"}
-        subtitle={
-          pending
-            ? `${pending.employee.name} · ${pending.employee.designation || "Staff"}`
-            : undefined
-        }
-        footer={
-          <>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={Boolean(busyId)}
-              onClick={() => setPending(null)}
-            >
-              {t.common.cancel}
-            </Button>
-            <Button
-              type="button"
-              variant={pending?.action === "out" ? "gold" : "primary"}
-              disabled={Boolean(busyId)}
-              onClick={() => void confirmPunch()}
-            >
-              {busyId
-                ? "Saving…"
-                : pending?.action === "out"
-                  ? "Clock out"
-                  : "Clock in"}
-            </Button>
-          </>
-        }
-      >
-        {pending ? (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-app bg-app px-4 py-4 text-center">
-              <p className="text-xs font-bold uppercase tracking-wide text-muted">
-                Current time
-              </p>
-              <p className="mt-1 text-2xl font-extrabold tabular-nums tracking-tight">
-                {now.toLocaleTimeString(undefined, {
-                  hour: "numeric",
-                  minute: "2-digit",
-                  second: "2-digit",
-                })}
-              </p>
-              <p className="mt-1 text-sm text-muted">{formatClockDate(today)}</p>
-            </div>
-            {pending.action === "out" && pending.openRecord ? (
-              <p className="text-sm text-muted">
-                Clocked in at {formatClockTime(pending.openRecord.clockInAt)} · worked{" "}
-                {formatDuration(pending.openRecord.clockInAt, null, nowMs)} so far.
-              </p>
-            ) : (
-              <Field label="Note (optional)">
-                <Input
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Late, split shift, covering…"
-                />
-              </Field>
-            )}
-          </div>
-        ) : null}
-      </Modal>
+        {activeEmployees.length === 0 ? (
+          <p className="text-sm text-muted">Add active employees first, then clock them in here.</p>
+        ) : (
+          <Table
+            bordered
+            headers={["Employee", "Clock in", "Clock out", "Duration", "Status"]}
+            colWidths={["26%", "20%", "20%", "14%", "20%"]}
+          >
+            {dayRows.map(({ employee, record, open }) => {
+              const working = Boolean(open);
+              const done = Boolean(record?.clockOutAt);
+              const busy = busyId === employee.id;
+              return (
+                <Tr key={employee.id} bordered>
+                  <Td bordered>
+                    <p className="font-semibold">{employee.name}</p>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {employee.designation || "Staff"} · {employee.shift}
+                    </p>
+                  </Td>
+                  <Td bordered>
+                    {record ? (
+                      <Input
+                        type="time"
+                        className="max-w-[9.5rem]"
+                        defaultValue={isoToTimeInput(record.clockInAt)}
+                        key={`${record.id}-in-${record.clockInAt}`}
+                        disabled={busy}
+                        onBlur={(e) => {
+                          void saveClockInTime(record, e.target.value);
+                        }}
+                      />
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={busy || openByEmployee.has(employee.id)}
+                        icon={<LogIn className="h-3.5 w-3.5" />}
+                        onClick={() => void handleClockIn(employee)}
+                      >
+                        {busy ? "…" : "Clock in"}
+                      </Button>
+                    )}
+                  </Td>
+                  <Td bordered>
+                    {done && record?.clockOutAt ? (
+                      <Input
+                        type="time"
+                        className="max-w-[9.5rem]"
+                        defaultValue={isoToTimeInput(record.clockOutAt)}
+                        key={`${record.id}-out-${record.clockOutAt}`}
+                        disabled={busy}
+                        onBlur={(e) => {
+                          void saveClockOutTime(record, e.target.value);
+                        }}
+                      />
+                    ) : working && open ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="gold"
+                        disabled={busy}
+                        icon={<LogOut className="h-3.5 w-3.5" />}
+                        onClick={() => void handleClockOut(employee, open)}
+                      >
+                        {busy ? "…" : "Clock out"}
+                      </Button>
+                    ) : (
+                      <Button type="button" size="sm" variant="secondary" disabled>
+                        Clock out
+                      </Button>
+                    )}
+                  </Td>
+                  <Td bordered className="tabular-nums">
+                    {record
+                      ? formatDuration(record.clockInAt, record.clockOutAt, nowMs)
+                      : "—"}
+                  </Td>
+                  <Td bordered>
+                    <Badge tone={working ? "success" : done ? "gold" : "muted"}>
+                      {working ? "In" : done ? "Out" : "Away"}
+                    </Badge>
+                  </Td>
+                </Tr>
+              );
+            })}
+          </Table>
+        )}
+      </Card>
     </div>
   );
 }

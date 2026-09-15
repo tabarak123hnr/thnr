@@ -89,7 +89,7 @@ export type AccountsSnapshot = {
   outstanding: number;
   /** Operating expenses */
   expenditures: number;
-  /** General & administrative expenses */
+  /** Operating and admin expenses */
   gaExpenditures: number;
   profit: number;
   checkoutCount: number;

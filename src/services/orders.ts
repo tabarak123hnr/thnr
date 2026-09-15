@@ -14,16 +14,20 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
+import { roundMoney } from "../lib/billing";
 import {
   calcOrderAmount,
+  orderTaxAmount,
+  orderTicketTotal,
   type FoodOrder,
   type FoodOrderItem,
   type FoodOrderPaymentStatus,
   type FoodOrderStatus,
 } from "../types/order";
-import { adjustCheckInExtraCharges } from "./checkIns";
+import { adjustCheckInExtraCharges, applyStayFoodTax } from "./checkIns";
 
 export type { FoodOrder, FoodOrderItem, FoodOrderPaymentStatus, FoodOrderStatus };
+export { calcOrderAmount, orderTaxAmount, orderTicketTotal };
 
 function mapOrder(id: string, data: Record<string, unknown>): FoodOrder {
   const items = Array.isArray(data.items)
@@ -54,6 +58,8 @@ function mapOrder(id: string, data: Record<string, unknown>): FoodOrder {
     guestName: String(data.guestName ?? ""),
     items,
     amount: Number(data.amount) || calcOrderAmount(items),
+    taxPercent: Number(data.taxPercent ?? 0) || 0,
+    taxAmount: Number(data.taxAmount ?? 0) || 0,
     status: (data.status as FoodOrderStatus) || "pending",
     paymentStatus,
     notes: String(data.notes ?? ""),
@@ -138,6 +144,10 @@ export async function createFoodOrder(input: {
   notes?: string;
   /** Default due — add to guest bill. Paid = cash collected now. */
   paymentStatus?: FoodOrderPaymentStatus;
+  /** Optional GST for this food ticket (synced onto the stay for food). */
+  taxPercent?: number;
+  taxLabel?: string;
+  taxRateId?: string | null;
 }) {
   if (!auth.currentUser) {
     throw new Error("You must be signed in to place an order.");
@@ -157,9 +167,20 @@ export async function createFoodOrder(input: {
   }
 
   const amount = calcOrderAmount(items);
+  const taxPercent = Math.max(0, Math.min(100, Number(input.taxPercent) || 0));
+  const taxAmount = taxPercent > 0 ? roundMoney((amount * taxPercent) / 100) : 0;
+  const ticketTotal = roundMoney(amount + taxAmount);
   const token = nextToken();
   const paymentStatus: FoodOrderPaymentStatus =
     input.paymentStatus === "paid" ? "paid" : "due";
+
+  if (taxPercent > 0) {
+    await applyStayFoodTax(input.checkInId, {
+      taxPercent,
+      taxLabel: input.taxLabel,
+      taxRateId: input.taxRateId,
+    });
+  }
 
   const ref = await addDoc(collection(db, "orders"), {
     token,
@@ -169,6 +190,8 @@ export async function createFoodOrder(input: {
     guestName: input.guestName.trim(),
     items,
     amount,
+    taxPercent,
+    taxAmount,
     status: "pending" as FoodOrderStatus,
     paymentStatus,
     notes: (input.notes ?? "").trim(),
@@ -179,7 +202,7 @@ export async function createFoodOrder(input: {
   });
 
   await adjustCheckInExtraCharges(input.checkInId, amount, {
-    paidDelta: paymentStatus === "paid" ? amount : 0,
+    paidDelta: paymentStatus === "paid" ? ticketTotal : 0,
   });
   await bumpRoomOpenOrders(input.roomId, 1);
 
@@ -250,13 +273,14 @@ export async function markOrderPayment(
 
   if (!prev.checkInId || !prev.amount) return;
 
-  // due → paid: guest paid this ticket now
+  const ticket = orderTicketTotal(prev);
+  // due → paid: guest paid this ticket now (food + GST)
   // paid → due: reverse the cash against the stay
   const paidDelta =
     paymentStatus === "paid" && prev.paymentStatus === "due"
-      ? prev.amount
+      ? ticket
       : paymentStatus === "due" && prev.paymentStatus === "paid"
-        ? -prev.amount
+        ? -ticket
         : 0;
 
   if (paidDelta) {
@@ -326,7 +350,7 @@ export async function deleteFoodOrder(id: string) {
 
   if (prev.checkInId && prev.amount) {
     await adjustCheckInExtraCharges(prev.checkInId, -prev.amount, {
-      paidDelta: prev.paymentStatus === "paid" ? -prev.amount : 0,
+      paidDelta: prev.paymentStatus === "paid" ? -orderTicketTotal(prev) : 0,
     });
   }
   if (prev.status === "pending") {

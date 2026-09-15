@@ -137,6 +137,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Sales tax / GST presets
+    match /taxRates/{taxRateId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if isAdmin();
+    }
+
     // Guest feedback — anyone can submit; only staff can read/manage
     match /feedback/{feedbackId} {
       allow create: if request.resource.data.keys().hasAll([

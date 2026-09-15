@@ -13,7 +13,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
-import { calcCheckoutBill, calcRoomBill, clampDiscountPercent } from "../lib/billing";
+import { calcCheckoutBill, calcRoomBill, clampDiscountPercent, taxOptionsFromStay } from "../lib/billing";
 import type {
   CheckInCompanion,
   CheckInRecord,
@@ -49,16 +49,24 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
   const checkOutAt = String(data.checkOutAt ?? "");
   const extraCharges = Number(data.extraCharges ?? 0);
   const discountPercent = clampDiscountPercent(data.discountPercent);
+  const taxOpts = taxOptionsFromStay(data);
   const computed =
     nightlyRate > 0 && checkInAt && checkOutAt
-      ? calcRoomBill(nightlyRate, checkInAt, checkOutAt, extraCharges, discountPercent)
+      ? calcRoomBill(
+          nightlyRate,
+          checkInAt,
+          checkOutAt,
+          extraCharges,
+          discountPercent,
+          taxOpts,
+        )
       : null;
 
   const paymentTiming =
     (data.paymentTiming as PaymentTiming) ||
     (data.paymentStatus === "paid" ? "paid_at_checkin" : "due_on_checkout");
 
-  const totalBill = computed?.totalBill ?? Number(data.totalBill ?? 0);
+  const totalBill = Number(data.totalBill ?? computed?.totalBill ?? 0);
   const storedPaid = Number(data.amountPaid ?? NaN);
   const split = resolvePaymentSplit(
     totalBill,
@@ -114,13 +122,21 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
       ? Math.max(0, Number(data.balanceDue))
       : split.balanceDue,
     nightlyRate: computed?.nightlyRate ?? nightlyRate,
-    discountPercent: computed?.discountPercent ?? discountPercent,
-    discountAmount: computed?.discountAmount ?? Number(data.discountAmount ?? 0),
-    discountedNightlyRate:
-      computed?.discountedNightlyRate ?? Number(data.discountedNightlyRate ?? nightlyRate),
+    discountPercent: Number(data.discountPercent ?? computed?.discountPercent ?? discountPercent),
+    discountAmount: Number(data.discountAmount ?? computed?.discountAmount ?? 0),
+    discountedNightlyRate: Number(
+      data.discountedNightlyRate ?? computed?.discountedNightlyRate ?? nightlyRate,
+    ),
     nights: Number(data.nights ?? computed?.nights ?? 0),
-    roomCharges: computed?.roomCharges ?? Number(data.roomCharges ?? 0),
+    roomCharges: Number(data.roomCharges ?? computed?.roomCharges ?? 0),
     extraCharges,
+    subtotal: Number(data.subtotal ?? computed?.subtotal ?? 0),
+    taxRateId: data.taxRateId ? String(data.taxRateId) : null,
+    taxLabel: String(data.taxLabel ?? ""),
+    taxPercent: Number(data.taxPercent ?? computed?.taxPercent ?? 0),
+    taxAppliesToRoom: data.taxAppliesToRoom !== false,
+    taxAppliesToFood: data.taxAppliesToFood !== false,
+    taxAmount: Number(data.taxAmount ?? computed?.taxAmount ?? 0),
     totalBill,
     checkedOutAt: data.checkedOutAt ? String(data.checkedOutAt) : null,
     checkoutMode: (data.checkoutMode as CheckInRecord["checkoutMode"]) ?? null,
@@ -201,18 +217,29 @@ export async function createCheckIn(input: {
   paymentTiming: PaymentTiming;
   /** Cash collected at check-in (required when timing is partial) */
   amountPaidAtCheckIn?: number;
+  taxRateId?: string | null;
+  taxLabel?: string;
+  taxPercent?: number;
+  taxAppliesToRoom?: boolean;
+  taxAppliesToFood?: boolean;
 }) {
   if (!auth.currentUser) {
     throw new Error("You must be signed in to check in a guest.");
   }
 
   const companions = normalizeCompanions(input.companions);
+  const taxOpts = {
+    taxPercent: input.taxPercent ?? 0,
+    taxAppliesToRoom: input.taxAppliesToRoom !== false,
+    taxAppliesToFood: input.taxAppliesToFood !== false,
+  };
   const bill = calcRoomBill(
     input.nightlyRate,
     input.checkInAt,
     input.checkOutAt,
     input.extraCharges ?? 0,
     input.discountPercent ?? 0,
+    taxOpts,
   );
   const split = resolvePaymentSplit(
     bill.totalBill,
@@ -266,6 +293,13 @@ export async function createCheckIn(input: {
     nights: bill.nights,
     roomCharges: bill.roomCharges,
     extraCharges: bill.extraCharges,
+    subtotal: bill.subtotal,
+    taxRateId: input.taxRateId ?? null,
+    taxLabel: (input.taxLabel ?? "").trim(),
+    taxPercent: bill.taxPercent,
+    taxAppliesToRoom: bill.taxAppliesToRoom,
+    taxAppliesToFood: bill.taxAppliesToFood,
+    taxAmount: bill.taxAmount,
     totalBill: bill.totalBill,
     checkedOutAt: null,
     checkoutMode: null,
@@ -332,6 +366,11 @@ export async function updateCheckIn(
     vehicleNumber?: string;
     paymentTiming?: PaymentTiming;
     amountPaidAtCheckIn?: number;
+    taxRateId?: string | null;
+    taxLabel?: string;
+    taxPercent?: number;
+    taxAppliesToRoom?: boolean;
+    taxAppliesToFood?: boolean;
   },
 ) {
   if (!auth.currentUser) {
@@ -339,16 +378,33 @@ export async function updateCheckIn(
   }
 
   const companions = normalizeCompanions(input.companions);
+  const existing = await getDoc(doc(db, "checkIns", id));
+  const existingData = existing.data();
+
+  const taxOpts = {
+    taxPercent:
+      input.taxPercent != null
+        ? input.taxPercent
+        : Number(existingData?.taxPercent ?? 0),
+    taxAppliesToRoom:
+      input.taxAppliesToRoom != null
+        ? input.taxAppliesToRoom
+        : existingData?.taxAppliesToRoom !== false,
+    taxAppliesToFood:
+      input.taxAppliesToFood != null
+        ? input.taxAppliesToFood
+        : existingData?.taxAppliesToFood !== false,
+  };
+
   const bill = calcRoomBill(
     input.nightlyRate,
     input.checkInAt,
     input.checkOutAt,
     input.extraCharges ?? 0,
-    input.discountPercent ?? 0,
+    input.discountPercent ?? clampDiscountPercent(existingData?.discountPercent),
+    taxOpts,
   );
 
-  const existing = await getDoc(doc(db, "checkIns", id));
-  const existingData = existing.data();
   const timing =
     input.paymentTiming ||
     (existingData?.paymentTiming as PaymentTiming) ||
@@ -394,6 +450,19 @@ export async function updateCheckIn(
     nights: bill.nights,
     roomCharges: bill.roomCharges,
     extraCharges: bill.extraCharges,
+    subtotal: bill.subtotal,
+    taxRateId:
+      input.taxRateId !== undefined
+        ? input.taxRateId
+        : (existingData?.taxRateId ?? null),
+    taxLabel:
+      input.taxLabel !== undefined
+        ? (input.taxLabel ?? "").trim()
+        : String(existingData?.taxLabel ?? ""),
+    taxPercent: bill.taxPercent,
+    taxAppliesToRoom: bill.taxAppliesToRoom,
+    taxAppliesToFood: bill.taxAppliesToFood,
+    taxAmount: bill.taxAmount,
     totalBill: bill.totalBill,
     updatedAt: serverTimestamp(),
   };
@@ -521,6 +590,7 @@ export async function checkoutGuest(
       actualOut,
       Number(data.extraCharges ?? 0),
       clampDiscountPercent(data.discountPercent),
+      taxOptionsFromStay(data),
     );
 
     // Keep cash already collected; clamp if early leave lowered the bill
@@ -577,6 +647,11 @@ export async function checkoutGuest(
       nights: bill.nights,
       roomCharges: bill.roomCharges,
       extraCharges: bill.extraCharges,
+      subtotal: bill.subtotal,
+      taxPercent: bill.taxPercent,
+      taxAppliesToRoom: bill.taxAppliesToRoom,
+      taxAppliesToFood: bill.taxAppliesToFood,
+      taxAmount: bill.taxAmount,
       totalBill: bill.totalBill,
       discountPercent: bill.discountPercent,
       discountAmount: bill.discountAmount,
@@ -711,6 +786,83 @@ export async function cancelCheckIn(id: string) {
 }
 
 /**
+ * Apply / update sales tax when food is ordered from the counter.
+ * Enables food GST; does not turn on room GST if the stay had no tax yet.
+ */
+export async function applyStayFoodTax(
+  checkInId: string,
+  input: {
+    taxPercent: number;
+    taxLabel?: string;
+    taxRateId?: string | null;
+  },
+) {
+  if (!auth.currentUser) throw new Error("You must be signed in.");
+  const percent = Math.max(0, Math.min(100, Number(input.taxPercent) || 0));
+  if (percent <= 0) return;
+
+  const ref = doc(db, "checkIns", checkInId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Check-in not found.");
+  const data = snap.data();
+  if (data.status !== "checked_in") {
+    throw new Error("Guest is not checked in.");
+  }
+
+  const prevPercent = Number(data.taxPercent ?? 0) || 0;
+  const patch: Record<string, unknown> = {
+    taxPercent: percent,
+    taxLabel: (input.taxLabel ?? "").trim() || `GST ${percent}%`,
+    taxRateId: input.taxRateId ?? null,
+    taxAppliesToFood: true,
+    updatedAt: serverTimestamp(),
+  };
+  // First time enabling tax from food counter — keep room untaxed unless already taxed
+  if (prevPercent <= 0) {
+    patch.taxAppliesToRoom = false;
+  }
+
+  const checkInAt = String(data.checkInAt ?? "");
+  const checkOutAt = String(data.checkOutAt ?? "");
+  const nightlyRate = Number(data.nightlyRate ?? 0);
+  const extraCharges = Number(data.extraCharges ?? 0);
+  const bill = calcRoomBill(
+    nightlyRate,
+    checkInAt,
+    checkOutAt,
+    extraCharges,
+    clampDiscountPercent(data.discountPercent),
+    {
+      taxPercent: percent,
+      taxAppliesToRoom:
+        prevPercent <= 0 ? false : data.taxAppliesToRoom !== false,
+      taxAppliesToFood: true,
+    },
+  );
+
+  Object.assign(patch, {
+    subtotal: bill.subtotal,
+    taxAmount: bill.taxAmount,
+    taxAppliesToRoom: bill.taxAppliesToRoom,
+    taxAppliesToFood: bill.taxAppliesToFood,
+    discountPercent: bill.discountPercent,
+    discountAmount: bill.discountAmount,
+    discountedNightlyRate: bill.discountedNightlyRate,
+    roomCharges: bill.roomCharges,
+    nights: bill.nights,
+    totalBill: bill.totalBill,
+  });
+
+  const amountPaid = Math.max(0, Number(data.amountPaid ?? 0));
+  const balanceDue = Math.max(0, bill.totalBill - amountPaid);
+  patch.balanceDue = balanceDue;
+  patch.paymentStatus =
+    balanceDue <= 0 ? "paid" : amountPaid > 0 ? "partial" : "due";
+
+  await updateDoc(ref, patch);
+}
+
+/**
  * Add/subtract food (or other) charges on an in-house stay.
  * `paidDelta` also adjusts amountPaid (use when food was paid at the counter).
  */
@@ -742,6 +894,7 @@ export async function adjustCheckInExtraCharges(
     checkOutAt,
     nextExtra,
     clampDiscountPercent(data.discountPercent),
+    taxOptionsFromStay(data),
   );
 
   const amountPaid = Math.max(0, Number(data.amountPaid ?? 0) + paidDelta);
@@ -762,6 +915,11 @@ export async function adjustCheckInExtraCharges(
     nights: bill.nights,
     roomCharges: bill.roomCharges,
     extraCharges: bill.extraCharges,
+    subtotal: bill.subtotal,
+    taxPercent: bill.taxPercent,
+    taxAppliesToRoom: bill.taxAppliesToRoom,
+    taxAppliesToFood: bill.taxAppliesToFood,
+    taxAmount: bill.taxAmount,
     totalBill: bill.totalBill,
     discountPercent: bill.discountPercent,
     discountAmount: bill.discountAmount,

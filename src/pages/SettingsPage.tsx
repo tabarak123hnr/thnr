@@ -1,11 +1,17 @@
-import { Eye, EyeOff, Lock, Mail } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { Eye, EyeOff, Lock, Mail, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "../components/ui/Button";
 import { Card, CardHeader } from "../components/ui/Card";
 import { Field, Input, PageHeader } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
+import {
+  createTaxRate,
+  deleteTaxRate,
+  subscribeTaxRates,
+  type TaxRate,
+} from "../services/taxRates";
 import {
   updateCurrentUserEmail,
   updateCurrentUserPassword,
@@ -61,6 +67,19 @@ export function SettingsPage() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
+  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
+  const [taxForm, setTaxForm] = useState({
+    name: "",
+    percent: "",
+  });
+  const [taxSaving, setTaxSaving] = useState(false);
+  const [taxError, setTaxError] = useState<string | null>(null);
+  const [deletingTaxId, setDeletingTaxId] = useState<string | null>(null);
+
+  useEffect(() => {
+    return subscribeTaxRates(setTaxRates);
+  }, []);
+
   async function submitEmail(e: FormEvent) {
     e.preventDefault();
     setEmailError(null);
@@ -102,11 +121,46 @@ export function SettingsPage() {
     }
   }
 
+  async function submitTax(e: FormEvent) {
+    e.preventDefault();
+    setTaxError(null);
+    setTaxSaving(true);
+    try {
+      await createTaxRate({
+        name: taxForm.name,
+        percent: Number(taxForm.percent) || 0,
+      });
+      setTaxForm({ name: "", percent: "" });
+      toastSuccess("Tax preset added", "Available on check-in.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not save tax preset.";
+      setTaxError(message);
+      toastError("Tax not saved", message);
+    } finally {
+      setTaxSaving(false);
+    }
+  }
+
+  async function removeTax(id: string) {
+    setDeletingTaxId(id);
+    try {
+      await deleteTaxRate(id);
+      toastSuccess("Tax preset removed");
+    } catch (err) {
+      toastError(
+        "Could not delete",
+        err instanceof Error ? err.message : "Try again.",
+      );
+    } finally {
+      setDeletingTaxId(null);
+    }
+  }
+
   return (
     <div>
       <PageHeader
         title={t.pages.settingsTitle}
-        subtitle="Account security, appearance, and language."
+        subtitle="Account security, appearance, language, and sales tax."
       />
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -161,6 +215,79 @@ export function SettingsPage() {
               </dd>
             </div>
           </dl>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader title="Sales tax / GST" />
+          <p className="mb-4 text-sm text-muted">
+            Add tax rates here. On check-in you choose whether GST applies to room and/or food.
+          </p>
+          <form
+            className="mb-4 grid gap-3 sm:grid-cols-[1fr_140px_auto]"
+            onSubmit={(e) => void submitTax(e)}
+          >
+            {taxError ? (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 sm:col-span-3 dark:bg-red-950/40 dark:text-red-300">
+                {taxError}
+              </p>
+            ) : null}
+            <Field label="Name">
+              <Input
+                required
+                value={taxForm.name}
+                onChange={(e) => setTaxForm((p) => ({ ...p, name: e.target.value }))}
+                placeholder="e.g. GST 18%"
+              />
+            </Field>
+            <Field label="Percent">
+              <Input
+                required
+                type="number"
+                min={0.01}
+                max={100}
+                step="0.01"
+                value={taxForm.percent}
+                onChange={(e) => setTaxForm((p) => ({ ...p, percent: e.target.value }))}
+                placeholder="18"
+              />
+            </Field>
+            <div className="flex items-end">
+              <Button
+                type="submit"
+                disabled={taxSaving}
+                icon={<Plus className="h-4 w-4" />}
+                className="w-full sm:w-auto"
+              >
+                {taxSaving ? "Saving…" : "Add sales tax"}
+              </Button>
+            </div>
+          </form>
+          {taxRates.length === 0 ? (
+            <p className="text-sm text-muted">No tax presets yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {taxRates.map((rate) => (
+                <li
+                  key={rate.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-app px-3 py-2.5"
+                >
+                  <p className="text-sm font-semibold">
+                    {rate.name} · {rate.percent}%
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="danger"
+                    icon={<Trash2 className="h-3.5 w-3.5" />}
+                    disabled={deletingTaxId === rate.id}
+                    onClick={() => void removeTax(rate.id)}
+                  >
+                    Delete
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
 
         {isAdmin ? (

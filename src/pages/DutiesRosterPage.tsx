@@ -7,8 +7,6 @@ import {
   Plus,
   Sparkles,
   Trash2,
-  UserPlus,
-  UserRound,
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -18,7 +16,7 @@ import { Button } from "../components/ui/Button";
 import { Card, CardHeader } from "../components/ui/Card";
 import { FancySelect, SelectField } from "../components/ui/FancySelect";
 import { Modal } from "../components/ui/Modal";
-import { Field, Input, PageHeader, StatCard, TextArea } from "../components/ui/Page";
+import { Field, Input, PageHeader, StatCard } from "../components/ui/Page";
 import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
@@ -34,7 +32,6 @@ import { cn } from "../lib/utils";
 import { subscribeEmployees, type Employee } from "../services/employees";
 import {
   createDuties,
-  createDuty,
   deleteDuty,
   dutyToInput,
   subscribeDuties,
@@ -78,6 +75,51 @@ const hkStatusLabel: Record<HousekeepingTask["status"], string> = {
   done: "Done",
 };
 
+type PageTab = "roster" | "daily" | "performance";
+type ScorePeriod = "today" | "week" | "all";
+
+function formatDutyDate(value: string) {
+  if (!value) return "—";
+  const d = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function emptyDailyRow() {
+  return {
+    key: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    title: "",
+    points: String(DEFAULT_DUTY_POINTS),
+    category: "Other" as DutyCategory,
+  };
+}
+
+function isRoomDuty(row: DutyAssignment) {
+  return Boolean(row.housekeepingTaskId) || /^Clean Room /i.test(row.title);
+}
+
+function dutyShowsOnDay(
+  duty: DutyAssignment,
+  day: string,
+  today: string,
+  hkTasks: HousekeepingTask[],
+) {
+  if (duty.status === "cancelled") return false;
+  if (duty.date === day) return true;
+  if (!duty.housekeepingTaskId) return false;
+  const task = hkTasks.find((t) => t.id === duty.housekeepingTaskId);
+  if (!task) return false;
+  if (task.status !== "done") {
+    return day === today && task.assigneeId === duty.assigneeId;
+  }
+  return Boolean(task.completedOn && task.completedOn === day);
+}
+
 function extraHousekeepingTasks(
   employeeId: string | undefined,
   allDuties: DutyAssignment[],
@@ -102,97 +144,11 @@ function extraHousekeepingTasks(
   });
 }
 
-function isRoomDuty(row: DutyAssignment) {
-  return Boolean(row.housekeepingTaskId) || /^Clean Room /i.test(row.title);
-}
-
-function dutyShowsOnDay(
-  duty: DutyAssignment,
-  day: string,
-  today: string,
-  hkTasks: HousekeepingTask[],
-) {
-  if (duty.status === "cancelled") return false;
-  if (duty.date === day) return true;
-  if (!duty.housekeepingTaskId) return false;
-  const task = hkTasks.find((t) => t.id === duty.housekeepingTaskId);
-  if (!task) return false;
-  if (task.status !== "done") {
-    return day === today && task.assigneeId === duty.assigneeId;
-  }
-  return Boolean(task.completedOn && task.completedOn === day);
-}
-
-type PageTab = "roster" | "daily" | "performance";
-type ScorePeriod = "today" | "week" | "all";
-
-function formatDutyDate(value: string) {
-  if (!value) return "—";
-  const d = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString(undefined, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function emptyForm() {
-  return {
-    title: "",
-    category: "Front desk" as DutyCategory,
-    description: "",
-    date: todayIsoDate(),
-    shift: "Morning" as DutyShift,
-    status: "scheduled" as DutyStatus,
-    points: String(DEFAULT_DUTY_POINTS),
-    assigneeId: "",
-    checkedInById: "",
-    checkedOutById: "",
-    notes: "",
-  };
-}
-
-function emptyDailyRow() {
-  return {
-    key: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    title: "",
-    points: String(DEFAULT_DUTY_POINTS),
-    category: "Other" as DutyCategory,
-  };
-}
-
-function employeeSelectOptions(
-  employees: Employee[],
-  extraId?: string | null,
-  extraName?: string | null,
-  emptyLabel = "Unassigned",
-) {
+function employeeOptions(employees: Employee[], emptyLabel = "Select employee") {
   const active = employees.filter((e) => e.status === "active");
-  const list = [...active];
-  if (extraId && !list.some((e) => e.id === extraId)) {
-    const found = employees.find((e) => e.id === extraId);
-    list.unshift(
-      found ?? {
-        id: extraId,
-        name: extraName || "Former staff",
-        phone: "",
-        email: "",
-        designation: "",
-        shift: "Morning",
-        status: "inactive",
-        address: "",
-        backgroundInformation: "",
-        notes: "",
-        cnicFrontImageUrl: null,
-        cnicBackImageUrl: null,
-      },
-    );
-  }
   return [
     { value: "", label: emptyLabel },
-    ...list.map((e) => ({
+    ...active.map((e) => ({
       value: e.id,
       label: e.name,
       description: e.designation || undefined,
@@ -212,16 +168,9 @@ export function DutiesRosterPage() {
   const [duties, setDuties] = useState<DutyAssignment[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [housekeepingTasks, setHousekeepingTasks] = useState<HousekeepingTask[]>([]);
-  const [statusFilter, setStatusFilter] = useState<"all" | "open" | DutyStatus>("open");
-  const [dateFilter, setDateFilter] = useState<"today" | "upcoming" | "all">("today");
+  const [rosterDate, setRosterDate] = useState(todayIsoDate);
   const [dailyDate, setDailyDate] = useState(todayIsoDate);
   const [scorePeriod, setScorePeriod] = useState<ScorePeriod>("week");
-
-  const [mode, setMode] = useState<"create" | "edit" | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(emptyForm);
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
 
   const [dailyOpen, setDailyOpen] = useState(false);
   const [dailySaving, setDailySaving] = useState(false);
@@ -230,9 +179,14 @@ export function DutiesRosterPage() {
     date: todayIsoDate(),
     shift: "Morning" as DutyShift,
     assigneeId: "",
-    checkedInById: "",
+    supervisorId: "",
     tasks: [emptyDailyRow()],
   });
+
+  const [editRow, setEditRow] = useState<DutyAssignment | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editStatus, setEditStatus] = useState<DutyStatus>("scheduled");
+  const [editSaving, setEditSaving] = useState(false);
 
   const [viewRow, setViewRow] = useState<DutyAssignment | null>(null);
   const [deleteRow, setDeleteRow] = useState<DutyAssignment | null>(null);
@@ -281,23 +235,10 @@ export function DutiesRosterPage() {
   }, [duties, housekeepingTasks, today]);
 
   const filtered = useMemo(() => {
-    return rosterDuties.filter((row) => {
-      if (statusFilter === "open") {
-        if (row.status === "completed" || row.status === "cancelled" || row.status === "missed") {
-          return false;
-        }
-      } else if (statusFilter !== "all" && row.status !== statusFilter) {
-        return false;
-      }
-      if (dateFilter === "today") {
-        if (row.date !== today && !dutyShowsOnDay(row, today, today, housekeepingTasks)) {
-          return false;
-        }
-      }
-      if (dateFilter === "upcoming" && row.date < today) return false;
-      return true;
-    });
-  }, [rosterDuties, statusFilter, dateFilter, today, housekeepingTasks]);
+    return rosterDuties.filter((row) =>
+      dutyShowsOnDay(row, rosterDate, today, housekeepingTasks),
+    );
+  }, [rosterDuties, rosterDate, today, housekeepingTasks]);
 
   const dailyDuties = useMemo(
     () =>
@@ -363,6 +304,12 @@ export function DutiesRosterPage() {
       .sort((a, b) => b.score - a.score || b.earnedPoints - a.earnedPoints);
   }, [employees, scoredDuties, today]);
 
+  const performanceById = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof scoreEmployeeDuties>>();
+    for (const row of performance) map.set(row.employeeId, row);
+    return map;
+  }, [performance]);
+
   const stats = useMemo(() => {
     const todays = rosterDuties.filter((d) => d.date === today);
     const scoredToday = todays.filter((d) => d.status !== "cancelled" && d.assigneeId);
@@ -371,7 +318,14 @@ export function DutiesRosterPage() {
       today: todays.length,
       inProgress: rosterDuties.filter((d) => d.status === "in_progress").length,
       completedToday: completedToday.length,
-      missed: rosterDuties.filter((d) => d.status === "missed" || (d.date < today && d.status !== "completed" && d.status !== "cancelled" && d.assigneeId)).length,
+      missed: rosterDuties.filter(
+        (d) =>
+          d.status === "missed" ||
+          (d.date < today &&
+            d.status !== "completed" &&
+            d.status !== "cancelled" &&
+            d.assigneeId),
+      ).length,
     };
   }, [rosterDuties, today]);
 
@@ -384,127 +338,40 @@ export function DutiesRosterPage() {
     );
   }
 
-  function closeForm() {
-    if (saving) return;
-    setMode(null);
-    setEditingId(null);
-    setFormError(null);
-  }
-
-  function openCreate() {
-    const self = findSelf();
-    setForm({
-      ...emptyForm(),
-      checkedInById: self?.id || "",
-    });
-    setEditingId(null);
-    setFormError(null);
-    setMode("create");
-  }
-
   function openDailyCreate(assigneeId = "") {
     const self = findSelf();
     setDailyForm({
       date: dailyDate || todayIsoDate(),
       shift: "Morning",
       assigneeId,
-      checkedInById: self?.id || "",
+      supervisorId: self?.id || "",
       tasks: [emptyDailyRow()],
     });
     setDailyError(null);
     setDailyOpen(true);
   }
 
-  function openEdit(row: DutyAssignment) {
-    setForm({
-      title: row.title,
-      category: row.category,
-      description: row.description,
-      date: row.date || todayIsoDate(),
-      shift: row.shift,
-      status: row.status,
-      points: String(dutyPoints(row)),
-      assigneeId: row.assigneeId || "",
-      checkedInById: row.checkedInById || "",
-      checkedOutById: row.checkedOutById || "",
-      notes: row.notes,
-    });
-    setEditingId(row.id);
-    setFormError(null);
-    setMode("edit");
-  }
-
-  function buildPayload() {
-    const assignee = employees.find((e) => e.id === form.assigneeId);
-    const inBy = employees.find((e) => e.id === form.checkedInById);
-    const outBy = employees.find((e) => e.id === form.checkedOutById);
-    return {
-      title: form.title.trim(),
-      category: form.category,
-      description: form.description,
-      date: form.date,
-      shift: form.shift,
-      status: form.status,
-      points: Number(form.points) || DEFAULT_DUTY_POINTS,
-      assigneeId: form.assigneeId || null,
-      assigneeName: assignee?.name || null,
-      checkedInById: form.checkedInById || null,
-      checkedInBy: inBy?.name || "",
-      checkedOutById: form.checkedOutById || null,
-      checkedOutBy: outBy?.name || "",
-      notes: form.notes,
-    };
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.title.trim()) {
-      setFormError("Duty / task title is required.");
-      return;
-    }
-    if (!form.date) {
-      setFormError("Date is required.");
-      return;
-    }
-    setSaving(true);
-    setFormError(null);
-    try {
-      const payload = buildPayload();
-      if (mode === "edit" && editingId) {
-        await updateDuty(editingId, payload);
-        toastSuccess("Duty updated", payload.title);
-      } else {
-        await createDuty(payload);
-        toastSuccess("Duty added", payload.title);
-      }
-      setMode(null);
-      setEditingId(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not save duty.";
-      setFormError(message);
-      toastError("Save failed", message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function submitDaily(e: React.FormEvent) {
     e.preventDefault();
     const assignee = employees.find((emp) => emp.id === dailyForm.assigneeId);
     if (!assignee) {
-      setDailyError("Select the employee these tasks belong to.");
+      setDailyError("Select the employee.");
+      return;
+    }
+    const supervisor = employees.find((emp) => emp.id === dailyForm.supervisorId);
+    if (!supervisor) {
+      setDailyError("Select the supervisor assigning these tasks.");
       return;
     }
     const tasks = dailyForm.tasks.filter((row) => row.title.trim());
     if (!tasks.length) {
-      setDailyError("Add at least one task title.");
+      setDailyError("Add at least one task.");
       return;
     }
     if (!dailyForm.date) {
       setDailyError("Date is required.");
       return;
     }
-    const inBy = employees.find((emp) => emp.id === dailyForm.checkedInById);
     setDailySaving(true);
     setDailyError(null);
     try {
@@ -519,22 +386,22 @@ export function DutiesRosterPage() {
           points: Number(row.points) || DEFAULT_DUTY_POINTS,
           assigneeId: assignee.id,
           assigneeName: assignee.name,
-          checkedInById: inBy?.id || null,
-          checkedInBy: inBy?.name || "",
+          checkedInById: supervisor.id,
+          checkedInBy: supervisor.name,
           checkedOutById: null,
           checkedOutBy: "",
           notes: "",
         })),
       );
       toastSuccess(
-        "Daily tasks added",
-        `${tasks.length} task${tasks.length === 1 ? "" : "s"} for ${assignee.name}`,
+        "Tasks assigned",
+        `${tasks.length} for ${assignee.name} · by ${supervisor.name}`,
       );
       setDailyOpen(false);
       setDailyDate(dailyForm.date);
-      setTab("daily");
+      setTab("roster");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not add daily tasks.";
+      const message = err instanceof Error ? err.message : "Could not add tasks.";
       setDailyError(message);
       toastError("Save failed", message);
     } finally {
@@ -546,11 +413,7 @@ export function DutiesRosterPage() {
     const self = findSelf();
     setSignDuty(row);
     setSignAction(action);
-    setSignSupervisorId(
-      action === "start"
-        ? row.checkedInById || self?.id || ""
-        : row.checkedOutById || self?.id || "",
-    );
+    setSignSupervisorId(row.checkedInById || self?.id || "");
     setSignError(null);
   }
 
@@ -558,16 +421,12 @@ export function DutiesRosterPage() {
     e.preventDefault();
     if (!signDuty || !signAction) return;
     if (!signDuty.assigneeId) {
-      setSignError("Assign an employee before starting this duty.");
+      setSignError("Assign an employee before updating this task.");
       return;
     }
     const supervisor = employees.find((emp) => emp.id === signSupervisorId);
     if (!supervisor) {
-      setSignError(
-        signAction === "start"
-          ? "Select who is checking this duty in."
-          : "Select who is checking this duty out.",
-      );
+      setSignError("Select the supervisor.");
       return;
     }
     setSignSaving(true);
@@ -582,7 +441,7 @@ export function DutiesRosterPage() {
             checkedInBy: supervisor.name,
           }),
         );
-        toastSuccess("Duty started", `${signDuty.title} · in by ${supervisor.name}`);
+        toastSuccess("Started", `${signDuty.title} · ${supervisor.name}`);
       } else {
         await updateDuty(
           signDuty.id,
@@ -592,15 +451,12 @@ export function DutiesRosterPage() {
             checkedOutBy: supervisor.name,
           }),
         );
-        toastSuccess(
-          "Task completed",
-          `${signDuty.title} · +${dutyPoints(signDuty)} pts`,
-        );
+        toastSuccess("Completed", `${signDuty.title} · +${dutyPoints(signDuty)} pts`);
       }
       setSignDuty(null);
       setSignAction(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not update duty.";
+      const message = err instanceof Error ? err.message : "Could not update task.";
       setSignError(message);
       toastError("Update failed", message);
     } finally {
@@ -613,14 +469,13 @@ export function DutiesRosterPage() {
     setMissing(true);
     try {
       await updateDuty(missRow.id, dutyToInput(missRow, { status: "missed" }));
-      toastSuccess(
-        "Marked missed",
-        `${missRow.title} · −${dutyPoints(missRow)} pts`,
-      );
+      toastSuccess("Marked missed", `${missRow.title} · −${dutyPoints(missRow)} pts`);
       setMissRow(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not mark missed.";
-      toastError("Update failed", message);
+      toastError(
+        "Update failed",
+        err instanceof Error ? err.message : "Could not mark missed.",
+      );
     } finally {
       setMissing(false);
     }
@@ -631,23 +486,42 @@ export function DutiesRosterPage() {
     setDeleting(true);
     try {
       await deleteDuty(deleteRow.id);
-      toastSuccess("Duty removed", deleteRow.title);
+      toastSuccess("Removed", deleteRow.title);
       setDeleteRow(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not delete duty.";
-      toastError("Delete failed", message);
+      toastError("Delete failed", err instanceof Error ? err.message : "Could not delete.");
     } finally {
       setDeleting(false);
     }
   }
 
-  const assigneeOptions = employeeSelectOptions(employees);
-  const supervisorOptions = employeeSelectOptions(
-    employees,
-    null,
-    null,
-    "Select supervisor",
-  );
+  function openEdit(row: DutyAssignment) {
+    setEditRow(row);
+    setEditTitle(row.title);
+    setEditStatus(row.status);
+  }
+
+  async function submitEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editRow) return;
+    if (!editTitle.trim()) return;
+    setEditSaving(true);
+    try {
+      await updateDuty(
+        editRow.id,
+        dutyToInput(editRow, { title: editTitle.trim(), status: editStatus }),
+      );
+      toastSuccess("Updated", editTitle.trim());
+      setEditRow(null);
+    } catch (err) {
+      toastError("Save failed", err instanceof Error ? err.message : "Could not update.");
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  const assigneeOptions = employeeOptions(employees);
+  const supervisorOptions = employeeOptions(employees, "Select supervisor");
 
   const tabs: { id: PageTab; label: string }[] = [
     { id: "daily", label: "Daily tasks" },
@@ -661,31 +535,20 @@ export function DutiesRosterPage() {
         title={t.pages.dutiesTitle}
         subtitle={t.pages.dutiesSub}
         actions={
-          <>
-            <Button
-              type="button"
-              variant="secondary"
-              className="w-full shrink-0 cursor-pointer sm:w-auto"
-              icon={<Plus className="h-4 w-4" />}
-              onClick={() => openDailyCreate()}
-            >
-              Add daily tasks
-            </Button>
-            <Button
-              type="button"
-              className="w-full shrink-0 cursor-pointer sm:w-auto"
-              icon={<Plus className="h-4 w-4" />}
-              onClick={openCreate}
-            >
-              Add duty
-            </Button>
-          </>
+          <Button
+            type="button"
+            className="w-full shrink-0 cursor-pointer sm:w-auto"
+            icon={<Plus className="h-4 w-4" />}
+            onClick={() => openDailyCreate()}
+          >
+            Assign daily tasks
+          </Button>
         }
       />
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Today" value={String(stats.today)} hint="Tasks on the roster today" />
-        <StatCard label="In progress" value={String(stats.inProgress)} hint="Currently on duty" />
+        <StatCard label="In progress" value={String(stats.inProgress)} hint="Currently working" />
         <StatCard
           label="Completed today"
           value={String(stats.completedToday)}
@@ -727,13 +590,23 @@ export function DutiesRosterPage() {
               />
             </Field>
             <p className="pb-2 text-sm text-muted">
-              {dailyDuties.length} task{dailyDuties.length === 1 ? "" : "s"} · {formatDutyDate(dailyDate)}
+              {dailyDuties.length} task{dailyDuties.length === 1 ? "" : "s"} ·{" "}
+              {formatDutyDate(dailyDate)}
             </p>
+            <Button
+              type="button"
+              size="sm"
+              className="ms-auto"
+              icon={<Plus className="h-3.5 w-3.5" />}
+              onClick={() => openDailyCreate()}
+            >
+              Assign tasks
+            </Button>
           </div>
           {dailyGroups.length === 0 ? (
             <Card>
               <p className="text-sm text-muted">
-                No tasks for this day. Add daily tasks and assign them to an employee.
+                No tasks for this day. Assign daily tasks to an employee with a supervisor.
               </p>
             </Card>
           ) : (
@@ -749,9 +622,6 @@ export function DutiesRosterPage() {
                 duties,
                 housekeepingTasks,
               );
-              const onHousekeepingDuty =
-                extraHk.length > 0 ||
-                group.rows.some((r) => r.category === "Housekeeping" || isRoomDuty(r));
               return (
                 <Card key={group.assigneeId || group.name}>
                   <CardHeader
@@ -780,84 +650,106 @@ export function DutiesRosterPage() {
                   {group.employee?.designation ? (
                     <p className="-mt-2 mb-3 text-xs text-muted">{group.employee.designation}</p>
                   ) : null}
-                  {onHousekeepingDuty ? (
-                    <p className="-mt-1 mb-3 text-xs text-muted">
-                      Room cleans from Housekeeping. Done rooms add +{HOUSEKEEPING_DUTY_POINTS}{" "}
-                      points.
-                    </p>
-                  ) : null}
                   <ul className="space-y-2">
                     {group.rows.map((row) => {
                       const fromHousekeeping = isRoomDuty(row);
                       const pts = dutyPoints(row);
                       return (
-                      <li
-                        key={row.id}
-                        className="flex flex-col gap-2 rounded-xl border border-app bg-app px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="min-w-0">
-                          <p className="flex flex-wrap items-center gap-1.5 font-semibold">
+                        <li
+                          key={row.id}
+                          className="flex flex-col gap-2 rounded-xl border border-app bg-app px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="min-w-0">
+                            <p className="flex flex-wrap items-center gap-1.5 font-semibold">
+                              {fromHousekeeping ? (
+                                <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                              ) : null}
+                              {row.title}
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted">
+                              {fromHousekeeping ? "Housekeeping" : row.category}
+                              {" · "}
+                              {row.shift}
+                              {row.checkedInBy ? ` · supervisor ${row.checkedInBy}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {row.status === "completed" ? (
+                              <Badge tone="success">+{pts} pts</Badge>
+                            ) : (
+                              <Badge tone="gold">{pts} pts</Badge>
+                            )}
+                            <Badge tone={statusTone[row.status]}>
+                              {statusLabel[row.status]}
+                            </Badge>
                             {fromHousekeeping ? (
-                              <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                              <Link
+                                to="/housekeeping"
+                                className="inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-semibold text-[var(--accent)] hover:underline"
+                              >
+                                Housekeeping
+                              </Link>
                             ) : null}
-                            {row.title}
-                          </p>
-                          <p className="mt-0.5 text-xs text-muted">
-                            {fromHousekeeping ? "Housekeeping" : row.category}
-                            {" · "}
-                            {row.shift}
-                            {row.checkedInBy && !fromHousekeeping
-                              ? ` · in by ${row.checkedInBy}`
-                              : ""}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {row.status === "completed" ? (
-                            <Badge tone="success">+{pts} pts</Badge>
-                          ) : (
-                            <Badge tone="gold">{pts} pts</Badge>
-                          )}
-                          <Badge tone={statusTone[row.status]}>{statusLabel[row.status]}</Badge>
-                          {fromHousekeeping ? (
-                            <Link
-                              to="/housekeeping"
-                              className="inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-semibold text-[var(--accent)] hover:underline"
-                            >
-                              Housekeeping
-                            </Link>
-                          ) : null}
-                          {!fromHousekeeping && row.status === "scheduled" ? (
+                            {!fromHousekeeping && row.status === "scheduled" ? (
+                              <Button
+                                size="sm"
+                                variant="gold"
+                                icon={<Play className="h-3.5 w-3.5" />}
+                                onClick={() => openSign(row, "start")}
+                              >
+                                Start
+                              </Button>
+                            ) : null}
+                            {!fromHousekeeping && row.status === "in_progress" ? (
+                              <Button
+                                size="sm"
+                                variant="gold"
+                                icon={<Check className="h-3.5 w-3.5" />}
+                                onClick={() => openSign(row, "complete")}
+                              >
+                                Done
+                              </Button>
+                            ) : null}
+                            {!fromHousekeeping && open.includes(row) ? (
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                icon={<XCircle className="h-3.5 w-3.5" />}
+                                onClick={() => setMissRow(row)}
+                              >
+                                Missed
+                              </Button>
+                            ) : null}
                             <Button
                               size="sm"
-                              variant="gold"
-                              icon={<Play className="h-3.5 w-3.5" />}
-                              onClick={() => openSign(row, "start")}
+                              className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
+                              icon={<Eye className="h-3.5 w-3.5" />}
+                              onClick={() => setViewRow(row)}
                             >
-                              Start
+                              View
                             </Button>
-                          ) : null}
-                          {!fromHousekeeping && row.status === "in_progress" ? (
-                            <Button
-                              size="sm"
-                              variant="gold"
-                              icon={<Check className="h-3.5 w-3.5" />}
-                              onClick={() => openSign(row, "complete")}
-                            >
-                              Done
-                            </Button>
-                          ) : null}
-                          {!fromHousekeeping && open.includes(row) ? (
-                            <Button
-                              size="sm"
-                              variant="danger"
-                              icon={<XCircle className="h-3.5 w-3.5" />}
-                              onClick={() => setMissRow(row)}
-                            >
-                              Missed
-                            </Button>
-                          ) : null}
-                        </div>
-                      </li>
+                            {!fromHousekeeping ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  icon={<Pencil className="h-3.5 w-3.5" />}
+                                  onClick={() => openEdit(row)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="danger"
+                                  icon={<Trash2 className="h-3.5 w-3.5" />}
+                                  onClick={() => setDeleteRow(row)}
+                                >
+                                  Delete
+                                </Button>
+                              </>
+                            ) : null}
+                          </div>
+                        </li>
                       );
                     })}
                     {extraHk.map((task) => (
@@ -909,13 +801,7 @@ export function DutiesRosterPage() {
           </div>
           <Card>
             <Table
-              headers={[
-                "Employee",
-                "Done / assigned",
-                "Earned",
-                "Deducted",
-                "Score",
-              ]}
+              headers={["Employee", "Done / assigned", "Earned", "Deducted", "Score"]}
               colWidths={["28%", "18%", "16%", "16%", "22%"]}
             >
               {performance.length === 0 ? (
@@ -947,192 +833,102 @@ export function DutiesRosterPage() {
                       −{row.deductedPoints}
                     </Td>
                     <Td>
-                      <div className="space-y-1.5">
-                        <Badge tone={scoreTone(row.score, row.hasScoredTasks)}>
-                          {row.hasScoredTasks ? `${row.score}% · ${row.label}` : row.label}
-                        </Badge>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-app">
-                          <div
-                            className="h-full rounded-full bg-[var(--accent)]"
-                            style={{ width: `${row.hasScoredTasks ? row.score : 0}%` }}
-                          />
-                        </div>
-                      </div>
+                      <Badge tone={scoreTone(row.score, row.hasScoredTasks)}>
+                        {row.hasScoredTasks ? `${row.score}% · ${row.label}` : row.label}
+                      </Badge>
                     </Td>
                   </Tr>
                 ))
               )}
             </Table>
           </Card>
-          <p className="mt-3 text-xs text-muted">
-            Completed tasks add points. Missed or overdue tasks deduct the same points from the
-            score. Today’s unfinished tasks stay pending until they are done or marked missed.
-          </p>
         </div>
       ) : null}
 
       {tab === "roster" ? (
         <>
-          <div className="mb-4 flex flex-wrap gap-2">
-            <div className="min-w-[8.5rem] flex-1 sm:w-36 sm:flex-none">
-              <FancySelect
-                value={dateFilter}
-                onChange={(v) => setDateFilter(v as typeof dateFilter)}
-                options={[
-                  { value: "today", label: "Today" },
-                  { value: "upcoming", label: "Upcoming" },
-                  { value: "all", label: "All dates" },
-                ]}
+          <div className="mb-4 flex flex-wrap items-end gap-3">
+            <Field label="Date" className="w-full sm:w-52">
+              <Input
+                type="date"
+                value={rosterDate}
+                onChange={(e) => setRosterDate(e.target.value)}
               />
-            </div>
-            <div className="min-w-[8.5rem] flex-1 sm:w-36 sm:flex-none">
-              <FancySelect
-                value={statusFilter}
-                onChange={(v) => setStatusFilter(v as typeof statusFilter)}
-                options={[
-                  { value: "open", label: "Open" },
-                  { value: "all", label: "All status" },
-                  ...DUTY_STATUSES.map((s) => ({ value: s.value, label: s.label })),
-                ]}
-              />
-            </div>
+            </Field>
+            <p className="pb-2 text-sm text-muted">
+              {filtered.length} task{filtered.length === 1 ? "" : "s"} ·{" "}
+              {formatDutyDate(rosterDate)}
+            </p>
           </div>
           <Card>
             <Table
+              bordered
               headers={[
-                "Duty",
-                "Assigned to",
-                "Pts",
-                "Checked in by",
-                "Checked out by",
-                t.status,
-                t.common.actions,
+                "Employee name",
+                "Designation",
+                "Task",
+                "Status",
+                "Performance",
               ]}
-              colWidths={["18%", "13%", "7%", "13%", "13%", "11%", "25%"]}
+              colWidths={["22%", "18%", "28%", "14%", "18%"]}
             >
               {filtered.length === 0 ? (
-                <Tr>
-                  <Td className="text-muted" colSpan={7}>
-                    No duties yet. Add a task and assign it to an employee.
+                <Tr bordered>
+                  <Td bordered className="text-muted" colSpan={5}>
+                    No tasks for this date. Assign daily tasks to staff.
                   </Td>
                 </Tr>
               ) : (
                 filtered.map((row) => {
                   const fromHousekeeping = isRoomDuty(row);
-                  const pts = dutyPoints(row);
+                  const employee = employees.find((e) => e.id === row.assigneeId);
+                  const score = row.assigneeId
+                    ? performanceById.get(row.assigneeId)
+                    : undefined;
                   return (
-                  <Tr key={row.id}>
-                    <Td>
-                      <p className="flex flex-wrap items-center gap-1.5 font-semibold">
-                        {fromHousekeeping ? (
-                          <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                    <Tr key={row.id} bordered>
+                      <Td bordered>
+                        <p className="font-semibold">
+                          {employee?.name || row.assigneeName || "Unassigned"}
+                        </p>
+                        {row.checkedInBy ? (
+                          <p className="mt-0.5 text-xs text-muted">
+                            Supervisor · {row.checkedInBy}
+                          </p>
                         ) : null}
-                        {row.title}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted">
-                        {fromHousekeeping ? "Housekeeping" : row.category} ·{" "}
-                        {formatDutyDate(row.date || today)} · {row.shift}
-                      </p>
-                    </Td>
-                    <Td>
-                      {row.assigneeName ? (
-                        <span className="font-semibold">{row.assigneeName}</span>
-                      ) : (
-                        <span className="text-muted">Unassigned</span>
-                      )}
-                    </Td>
-                    <Td className={row.status === "completed" ? "font-semibold text-emerald-700 dark:text-emerald-400" : ""}>
-                      {row.status === "completed" ? `+${pts}` : pts}
-                    </Td>
-                    <Td className="text-muted">{row.checkedInBy || "—"}</Td>
-                    <Td className="text-muted">{row.checkedOutBy || "—"}</Td>
-                    <Td>
-                      <Badge tone={statusTone[row.status]}>{statusLabel[row.status]}</Badge>
-                    </Td>
-                    <Td>
-                      <div className="flex flex-wrap gap-1.5">
-                        <Button
-                          size="sm"
-                          className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
-                          icon={<Eye className="h-3.5 w-3.5" />}
-                          onClick={() => setViewRow(row)}
-                        >
-                          View
-                        </Button>
-                        {fromHousekeeping ? (
-                          <Link
-                            to="/housekeeping"
-                            className="inline-flex h-8 items-center rounded-lg bg-[color-mix(in_oklab,var(--accent)_18%,transparent)] px-2.5 text-xs font-semibold text-[var(--accent)]"
-                          >
-                            Housekeeping
-                          </Link>
-                        ) : null}
-                        {!fromHousekeeping && row.status === "scheduled" && row.assigneeId ? (
-                          <Button
-                            size="sm"
-                            variant="gold"
-                            className="cursor-pointer"
-                            icon={<Play className="h-3.5 w-3.5" />}
-                            onClick={() => openSign(row, "start")}
-                          >
-                            Start
-                          </Button>
-                        ) : null}
-                        {!fromHousekeeping && row.status === "scheduled" && !row.assigneeId ? (
-                          <Button
-                            size="sm"
-                            variant="gold"
-                            className="cursor-pointer"
-                            icon={<UserPlus className="h-3.5 w-3.5" />}
-                            onClick={() => openEdit(row)}
-                          >
-                            Assign
-                          </Button>
-                        ) : null}
-                        {!fromHousekeeping && row.status === "in_progress" ? (
-                          <Button
-                            size="sm"
-                            variant="gold"
-                            className="cursor-pointer"
-                            icon={<Check className="h-3.5 w-3.5" />}
-                            onClick={() => openSign(row, "complete")}
-                          >
-                            Complete
-                          </Button>
-                        ) : null}
-                        {!fromHousekeeping &&
-                        (row.status === "scheduled" || row.status === "in_progress") ? (
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            className="cursor-pointer"
-                            icon={<XCircle className="h-3.5 w-3.5" />}
-                            onClick={() => setMissRow(row)}
-                          >
-                            Missed
-                          </Button>
-                        ) : null}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="cursor-pointer"
-                          icon={<Pencil className="h-3.5 w-3.5" />}
-                          onClick={() => openEdit(row)}
-                        >
-                          {t.common.edit}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          className="cursor-pointer"
-                          icon={<Trash2 className="h-3.5 w-3.5" />}
-                          onClick={() => setDeleteRow(row)}
-                        >
-                          {t.common.delete}
-                        </Button>
-                      </div>
-                    </Td>
-                  </Tr>
+                      </Td>
+                      <Td bordered className="text-muted">
+                        {employee?.designation || "—"}
+                      </Td>
+                      <Td bordered>
+                        <p className="flex flex-wrap items-center gap-1.5 font-semibold">
+                          {fromHousekeeping ? (
+                            <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                          ) : null}
+                          {row.title}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted">
+                          {fromHousekeeping ? "Housekeeping" : row.category} ·{" "}
+                          {row.shift}
+                        </p>
+                      </Td>
+                      <Td bordered>
+                        <Badge tone={statusTone[row.status]}>
+                          {statusLabel[row.status]}
+                        </Badge>
+                      </Td>
+                      <Td bordered>
+                        {score ? (
+                          <Badge tone={scoreTone(score.score, score.hasScoredTasks)}>
+                            {score.hasScoredTasks
+                              ? `${score.score}% · ${score.label}`
+                              : score.label}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted">—</span>
+                        )}
+                      </Td>
+                    </Tr>
                   );
                 })
               )}
@@ -1144,9 +940,8 @@ export function DutiesRosterPage() {
       <Modal
         open={Boolean(viewRow)}
         onClose={() => setViewRow(null)}
-        title={viewRow?.title ?? "Duty"}
+        title={viewRow?.title ?? "Task"}
         subtitle={viewRow ? `${viewRow.category} · ${formatDutyDate(viewRow.date)}` : undefined}
-        wide
         footer={
           <Button type="button" variant="secondary" onClick={() => setViewRow(null)}>
             Close
@@ -1154,162 +949,18 @@ export function DutiesRosterPage() {
         }
       >
         {viewRow ? (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone="gold">{viewRow.shift}</Badge>
-              <Badge tone={statusTone[viewRow.status]}>{statusLabel[viewRow.status]}</Badge>
-              <Badge tone="gold">{dutyPoints(viewRow)} pts</Badge>
-              {viewRow.housekeepingTaskId ? (
-                <Badge tone="info">Housekeeping room</Badge>
-              ) : null}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Detail label="Assigned to" value={viewRow.assigneeName || "Unassigned"} />
-              <Detail label="Category" value={viewRow.category} />
-              <Detail label="Checked in by" value={viewRow.checkedInBy || "—"} />
-              <Detail label="Checked out by" value={viewRow.checkedOutBy || "—"} />
-            </div>
-            {viewRow.description ? (
-              <section className="rounded-2xl border border-app bg-app px-4 py-3">
-                <p className="mb-1 text-xs font-bold uppercase tracking-wide text-muted">
-                  Duty details
-                </p>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed">{viewRow.description}</p>
-              </section>
-            ) : null}
-            {viewRow.notes ? (
-              <p className="rounded-xl bg-app px-3 py-2 text-sm text-muted">{viewRow.notes}</p>
-            ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Detail label="Employee" value={viewRow.assigneeName || "Unassigned"} />
+            <Detail label="Status" value={statusLabel[viewRow.status]} />
+            <Detail label="Supervisor" value={viewRow.checkedInBy || "—"} />
+            <Detail
+              label="Completed by"
+              value={viewRow.checkedOutBy || "—"}
+            />
+            <Detail label="Points" value={String(dutyPoints(viewRow))} />
+            <Detail label="Shift" value={viewRow.shift} />
           </div>
         ) : null}
-      </Modal>
-
-      <Modal
-        open={mode != null}
-        onClose={closeForm}
-        title={mode === "edit" ? "Edit duty" : "Add duty"}
-        subtitle="Assign a task to staff. Completed tasks earn points; missed tasks deduct them."
-        wide
-        footer={
-          <>
-            <Button type="button" variant="secondary" disabled={saving} onClick={closeForm}>
-              {t.common.cancel}
-            </Button>
-            <Button type="submit" form="duty-form" disabled={saving}>
-              {saving ? "Saving…" : t.common.save}
-            </Button>
-          </>
-        }
-      >
-        <form id="duty-form" className="space-y-5" onSubmit={submit}>
-          {formError ? (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-              {formError}
-            </p>
-          ) : null}
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Duty / task" className="sm:col-span-2">
-              <Input
-                required
-                value={form.title}
-                onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-                placeholder="e.g. Night security, Lobby reception, Kitchen prep"
-              />
-            </Field>
-            <SelectField label="Category">
-              <FancySelect
-                value={form.category}
-                onChange={(category) =>
-                  setForm((p) => ({ ...p, category: category as DutyCategory }))
-                }
-                options={DUTY_CATEGORIES.map((c) => ({ value: c, label: c }))}
-              />
-            </SelectField>
-            <SelectField label={t.status}>
-              <FancySelect
-                value={form.status}
-                onChange={(status) => setForm((p) => ({ ...p, status: status as DutyStatus }))}
-                options={DUTY_STATUSES.map((s) => ({ value: s.value, label: s.label }))}
-              />
-            </SelectField>
-            <Field label="Date">
-              <Input
-                required
-                type="date"
-                value={form.date}
-                onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
-              />
-            </Field>
-            <SelectField label={t.common.shift}>
-              <FancySelect
-                value={form.shift}
-                onChange={(shift) => setForm((p) => ({ ...p, shift: shift as DutyShift }))}
-                options={DUTY_SHIFTS.map((s) => ({ value: s, label: s }))}
-              />
-            </SelectField>
-            <Field label="Points">
-              <Input
-                required
-                type="number"
-                min={1}
-                value={form.points}
-                onChange={(e) => setForm((p) => ({ ...p, points: e.target.value }))}
-              />
-            </Field>
-          </div>
-
-          <div>
-            <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted">
-              <UserRound className="h-3.5 w-3.5" />
-              Assignment & supervisors
-            </p>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <SelectField label="Assign to" className="sm:col-span-2">
-                <FancySelect
-                  value={form.assigneeId}
-                  onChange={(assigneeId) => setForm((p) => ({ ...p, assigneeId }))}
-                  options={assigneeOptions}
-                  placeholder={
-                    employees.length ? "Select employee" : "Add employees first"
-                  }
-                />
-              </SelectField>
-              <SelectField label="Checked in by">
-                <FancySelect
-                  value={form.checkedInById}
-                  onChange={(checkedInById) => setForm((p) => ({ ...p, checkedInById }))}
-                  options={supervisorOptions}
-                  placeholder="Supervisor who starts the duty"
-                />
-              </SelectField>
-              <SelectField label="Checked out by">
-                <FancySelect
-                  value={form.checkedOutById}
-                  onChange={(checkedOutById) => setForm((p) => ({ ...p, checkedOutById }))}
-                  options={supervisorOptions}
-                  placeholder="Supervisor who signs off"
-                />
-              </SelectField>
-            </div>
-          </div>
-
-          <Field label="Duty details">
-            <TextArea
-              value={form.description}
-              onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-              rows={3}
-              placeholder="What this duty covers, area, or instructions"
-            />
-          </Field>
-          <Field label={t.common.notes}>
-            <TextArea
-              value={form.notes}
-              onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
-              rows={2}
-            />
-          </Field>
-        </form>
       </Modal>
 
       <Modal
@@ -1318,8 +969,8 @@ export function DutiesRosterPage() {
           if (dailySaving) return;
           setDailyOpen(false);
         }}
-        title="Add daily tasks"
-        subtitle="Give one employee several tasks for a day. Each completed task earns points; missed tasks deduct them."
+        title="Assign daily tasks"
+        subtitle="Pick employee + supervisor, then list the tasks."
         wide
         footer={
           <>
@@ -1332,7 +983,7 @@ export function DutiesRosterPage() {
               {t.common.cancel}
             </Button>
             <Button type="submit" form="daily-tasks-form" disabled={dailySaving}>
-              {dailySaving ? "Saving…" : "Save tasks"}
+              {dailySaving ? "Saving…" : "Assign tasks"}
             </Button>
           </>
         }
@@ -1349,7 +1000,15 @@ export function DutiesRosterPage() {
                 value={dailyForm.assigneeId}
                 onChange={(assigneeId) => setDailyForm((p) => ({ ...p, assigneeId }))}
                 options={assigneeOptions}
-                placeholder={employees.length ? "Who must do these tasks" : "Add employees first"}
+                placeholder={employees.length ? "Who does the work" : "Add employees first"}
+              />
+            </SelectField>
+            <SelectField label="Supervisor" className="sm:col-span-2">
+              <FancySelect
+                value={dailyForm.supervisorId}
+                onChange={(supervisorId) => setDailyForm((p) => ({ ...p, supervisorId }))}
+                options={supervisorOptions}
+                placeholder="Who is assigning these tasks"
               />
             </SelectField>
             <Field label="Date">
@@ -1369,20 +1028,15 @@ export function DutiesRosterPage() {
                 options={DUTY_SHIFTS.map((s) => ({ value: s, label: s }))}
               />
             </SelectField>
-            <SelectField label="Checked in by" className="sm:col-span-2">
-              <FancySelect
-                value={dailyForm.checkedInById}
-                onChange={(checkedInById) => setDailyForm((p) => ({ ...p, checkedInById }))}
-                options={supervisorOptions}
-                placeholder="Supervisor"
-              />
-            </SelectField>
           </div>
 
           <div className="space-y-3">
-            <p className="text-xs font-bold uppercase tracking-wide text-muted">Tasks for this day</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-muted">Tasks</p>
             {dailyForm.tasks.map((row, index) => (
-              <div key={row.key} className="grid gap-2 rounded-xl border border-app bg-app p-3 sm:grid-cols-[1fr_9rem_7rem_auto]">
+              <div
+                key={row.key}
+                className="grid gap-2 rounded-xl border border-app bg-app p-3 sm:grid-cols-[1fr_9rem_auto]"
+              >
                 <Field label={index === 0 ? "Task" : ""}>
                   <Input
                     value={row.title}
@@ -1397,7 +1051,7 @@ export function DutiesRosterPage() {
                     placeholder="What they must finish"
                   />
                 </Field>
-                <SelectField label={index === 0 ? "Category" : ""}>
+                <SelectField label={index === 0 ? "Area" : ""}>
                   <FancySelect
                     value={row.category}
                     onChange={(category) =>
@@ -1413,22 +1067,22 @@ export function DutiesRosterPage() {
                     options={DUTY_CATEGORIES.map((c) => ({ value: c, label: c }))}
                   />
                 </SelectField>
-                <Field label={index === 0 ? "Pts" : ""}>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={row.points}
-                    onChange={(e) =>
-                      setDailyForm((p) => ({
-                        ...p,
-                        tasks: p.tasks.map((task) =>
-                          task.key === row.key ? { ...task, points: e.target.value } : task,
-                        ),
-                      }))
-                    }
-                  />
-                </Field>
-                <div className={cn("flex items-end", index === 0 && "sm:pb-0")}>
+                <div className="flex items-end gap-1">
+                  <Field label={index === 0 ? "Pts" : ""} className="w-20">
+                    <Input
+                      type="number"
+                      min={1}
+                      value={row.points}
+                      onChange={(e) =>
+                        setDailyForm((p) => ({
+                          ...p,
+                          tasks: p.tasks.map((task) =>
+                            task.key === row.key ? { ...task, points: e.target.value } : task,
+                          ),
+                        }))
+                      }
+                    />
+                  </Field>
                   <Button
                     type="button"
                     size="sm"
@@ -1441,9 +1095,8 @@ export function DutiesRosterPage() {
                         tasks: p.tasks.filter((task) => task.key !== row.key),
                       }))
                     }
-                  >
-                    Remove
-                  </Button>
+                    aria-label="Remove task"
+                  />
                 </div>
               </div>
             ))}
@@ -1469,12 +1122,8 @@ export function DutiesRosterPage() {
           setSignAction(null);
           setSignError(null);
         }}
-        title={signAction === "complete" ? "Complete duty" : "Start duty"}
-        subtitle={
-          signAction === "complete"
-            ? `Who is checking out ${signDuty?.assigneeName || "this staff member"}?`
-            : `Who is checking in ${signDuty?.assigneeName || "this staff member"}?`
-        }
+        title={signAction === "complete" ? "Complete task" : "Start task"}
+        subtitle="Confirm with the supervising staff member."
         footer={
           <>
             <Button
@@ -1492,8 +1141,8 @@ export function DutiesRosterPage() {
               {signSaving
                 ? "Saving…"
                 : signAction === "complete"
-                  ? "Check out & complete"
-                  : "Check in & start"}
+                  ? "Mark complete"
+                  : "Start task"}
             </Button>
           </>
         }
@@ -1507,18 +1156,57 @@ export function DutiesRosterPage() {
           <div className="rounded-xl border border-app bg-app px-4 py-3 text-sm">
             <p className="font-semibold">{signDuty?.title}</p>
             <p className="mt-0.5 text-muted">
-              {signDuty?.assigneeName || "Unassigned"} · {signDuty?.shift}
+              {signDuty?.assigneeName || "Unassigned"}
               {signDuty ? ` · ${dutyPoints(signDuty)} pts` : ""}
             </p>
           </div>
-          <SelectField
-            label={signAction === "complete" ? "Checked out by" : "Checked in by"}
-          >
+          <SelectField label="Supervisor">
             <FancySelect
               value={signSupervisorId}
               onChange={setSignSupervisorId}
               options={supervisorOptions}
               placeholder="Select supervisor"
+            />
+          </SelectField>
+        </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(editRow)}
+        onClose={() => {
+          if (editSaving) return;
+          setEditRow(null);
+        }}
+        title="Edit task"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={editSaving}
+              onClick={() => setEditRow(null)}
+            >
+              {t.common.cancel}
+            </Button>
+            <Button type="submit" form="edit-duty-form" disabled={editSaving}>
+              {editSaving ? "Saving…" : t.common.save}
+            </Button>
+          </>
+        }
+      >
+        <form id="edit-duty-form" className="space-y-4" onSubmit={submitEdit}>
+          <Field label="Task">
+            <Input
+              required
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+            />
+          </Field>
+          <SelectField label="Status">
+            <FancySelect
+              value={editStatus}
+              onChange={(v) => setEditStatus(v as DutyStatus)}
+              options={DUTY_STATUSES.map((s) => ({ value: s.value, label: s.label }))}
             />
           </SelectField>
         </form>
@@ -1553,8 +1241,7 @@ export function DutiesRosterPage() {
         }
       >
         <p className="text-sm text-muted">
-          Use this when the task was not done. Overdue open tasks also deduct automatically the
-          next day.
+          Use when the task was not done. Overdue open tasks also deduct the next day.
         </p>
       </Modal>
 
@@ -1564,11 +1251,9 @@ export function DutiesRosterPage() {
           if (deleting) return;
           setDeleteRow(null);
         }}
-        title="Delete duty"
+        title="Delete task"
         subtitle={
-          deleteRow
-            ? `Remove “${deleteRow.title}” from the roster? This cannot be undone.`
-            : undefined
+          deleteRow ? `Remove “${deleteRow.title}” from the roster?` : undefined
         }
         footer={
           <>
@@ -1586,9 +1271,7 @@ export function DutiesRosterPage() {
           </>
         }
       >
-        <p className="text-sm text-muted">
-          Assigned staff and supervisor records for this duty will be removed.
-        </p>
+        <p className="text-sm text-muted">This cannot be undone.</p>
       </Modal>
     </div>
   );
