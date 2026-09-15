@@ -2023,11 +2023,6 @@ export function CheckInPage() {
   );
 }
 
-function stayFallbackNights(row: CheckInRecord) {
-  if (row.nights) return row.nights;
-  return calcRoomBill(row.nightlyRate || 0, row.checkInAt, row.checkOutAt).nights;
-}
-
 function CnicUploadSlot({
   label,
   preview,
