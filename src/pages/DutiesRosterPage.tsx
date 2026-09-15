@@ -80,19 +80,47 @@ const hkStatusLabel: Record<HousekeepingTask["status"], string> = {
 
 function extraHousekeepingTasks(
   employeeId: string | undefined,
-  dayDuties: DutyAssignment[],
+  allDuties: DutyAssignment[],
   hkTasks: HousekeepingTask[],
 ) {
   if (!employeeId) return [];
-  const linked = new Set(
-    dayDuties.map((d) => d.housekeepingTaskId).filter((id): id is string => Boolean(id)),
+  const linkedTaskIds = new Set(
+    allDuties.map((d) => d.housekeepingTaskId).filter((id): id is string => Boolean(id)),
   );
-  return hkTasks.filter(
-    (task) =>
-      task.assigneeId === employeeId &&
-      task.status !== "done" &&
-      !linked.has(task.id),
+  const linkedDutyIds = new Set(allDuties.map((d) => d.id));
+  const roomTitles = new Set(
+    allDuties
+      .filter((d) => d.assigneeId === employeeId && d.status !== "cancelled")
+      .map((d) => d.title.trim().toLowerCase()),
   );
+  return hkTasks.filter((task) => {
+    if (task.assigneeId !== employeeId || task.status === "done") return false;
+    if (linkedTaskIds.has(task.id)) return false;
+    if (task.dutyId && linkedDutyIds.has(task.dutyId)) return false;
+    if (roomTitles.has(`clean room ${task.roomNumber}`.toLowerCase())) return false;
+    return true;
+  });
+}
+
+function isRoomDuty(row: DutyAssignment) {
+  return Boolean(row.housekeepingTaskId) || /^Clean Room /i.test(row.title);
+}
+
+function dutyShowsOnDay(
+  duty: DutyAssignment,
+  day: string,
+  today: string,
+  hkTasks: HousekeepingTask[],
+) {
+  if (duty.status === "cancelled") return false;
+  if (duty.date === day) return true;
+  if (!duty.housekeepingTaskId) return false;
+  const task = hkTasks.find((t) => t.id === duty.housekeepingTaskId);
+  if (!task) return false;
+  if (task.status !== "done") {
+    return day === today && task.assigneeId === duty.assigneeId;
+  }
+  return Boolean(task.completedOn && task.completedOn === day);
 }
 
 type PageTab = "roster" | "daily" | "performance";
@@ -231,8 +259,29 @@ export function DutiesRosterPage() {
 
   const today = todayIsoDate();
 
+  const rosterDuties = useMemo(() => {
+    return duties.map((d) => {
+      if (!d.housekeepingTaskId && !isRoomDuty(d)) return d;
+      const task = d.housekeepingTaskId
+        ? housekeepingTasks.find((t) => t.id === d.housekeepingTaskId)
+        : undefined;
+      if (d.status === "completed") {
+        return {
+          ...d,
+          points: HOUSEKEEPING_DUTY_POINTS,
+          date: task?.completedOn || d.date || today,
+        };
+      }
+      return {
+        ...d,
+        points: HOUSEKEEPING_DUTY_POINTS,
+        date: today,
+      };
+    });
+  }, [duties, housekeepingTasks, today]);
+
   const filtered = useMemo(() => {
-    return duties.filter((row) => {
+    return rosterDuties.filter((row) => {
       if (statusFilter === "open") {
         if (row.status === "completed" || row.status === "cancelled" || row.status === "missed") {
           return false;
@@ -240,15 +289,20 @@ export function DutiesRosterPage() {
       } else if (statusFilter !== "all" && row.status !== statusFilter) {
         return false;
       }
-      if (dateFilter === "today" && row.date !== today) return false;
+      if (dateFilter === "today") {
+        if (row.date !== today && !dutyShowsOnDay(row, today, today, housekeepingTasks)) {
+          return false;
+        }
+      }
       if (dateFilter === "upcoming" && row.date < today) return false;
       return true;
     });
-  }, [duties, statusFilter, dateFilter, today]);
+  }, [rosterDuties, statusFilter, dateFilter, today, housekeepingTasks]);
 
   const dailyDuties = useMemo(
-    () => duties.filter((d) => d.date === dailyDate && d.status !== "cancelled"),
-    [duties, dailyDate],
+    () =>
+      rosterDuties.filter((d) => dutyShowsOnDay(d, dailyDate, today, housekeepingTasks)),
+    [rosterDuties, dailyDate, today, housekeepingTasks],
   );
 
   const dailyGroups = useMemo(() => {
@@ -275,6 +329,9 @@ export function DutiesRosterPage() {
       for (const task of housekeepingTasks) {
         if (!task.assigneeId || task.status === "done") continue;
         if (byId.has(task.assigneeId)) continue;
+        if (!extraHousekeepingTasks(task.assigneeId, duties, housekeepingTasks).length) {
+          continue;
+        }
         const employee = employees.find((e) => e.id === task.assigneeId) ?? null;
         byId.set(task.assigneeId, {
           employee,
@@ -284,12 +341,19 @@ export function DutiesRosterPage() {
         });
       }
     }
+    for (const group of byId.values()) {
+      group.rows.sort((a, b) => {
+        const rank = (status: DutyStatus) =>
+          status === "completed" || status === "missed" ? 1 : 0;
+        return rank(a.status) - rank(b.status);
+      });
+    }
     return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [dailyDuties, employees, housekeepingTasks, dailyDate, today]);
+  }, [dailyDuties, employees, housekeepingTasks, dailyDate, today, duties]);
 
   const scoredDuties = useMemo(
-    () => dutiesInPeriod(duties, scorePeriod, today),
-    [duties, scorePeriod, today],
+    () => dutiesInPeriod(rosterDuties, scorePeriod, today),
+    [rosterDuties, scorePeriod, today],
   );
 
   const performance = useMemo(() => {
@@ -300,16 +364,16 @@ export function DutiesRosterPage() {
   }, [employees, scoredDuties, today]);
 
   const stats = useMemo(() => {
-    const todays = duties.filter((d) => d.date === today);
+    const todays = rosterDuties.filter((d) => d.date === today);
     const scoredToday = todays.filter((d) => d.status !== "cancelled" && d.assigneeId);
     const completedToday = scoredToday.filter((d) => d.status === "completed");
     return {
       today: todays.length,
-      inProgress: duties.filter((d) => d.status === "in_progress").length,
+      inProgress: rosterDuties.filter((d) => d.status === "in_progress").length,
       completedToday: completedToday.length,
-      missed: duties.filter((d) => d.status === "missed" || (d.date < today && d.status !== "completed" && d.status !== "cancelled" && d.assigneeId)).length,
+      missed: rosterDuties.filter((d) => d.status === "missed" || (d.date < today && d.status !== "completed" && d.status !== "cancelled" && d.assigneeId)).length,
     };
-  }, [duties, today]);
+  }, [rosterDuties, today]);
 
   function findSelf() {
     return employees.find(
@@ -675,21 +739,19 @@ export function DutiesRosterPage() {
           ) : (
             dailyGroups.map((group) => {
               const score = group.employee
-                ? scoreEmployeeDuties(
-                    duties.filter((d) => d.date === dailyDate),
-                    group.employee,
-                    today,
-                  )
+                ? scoreEmployeeDuties(dailyDuties, group.employee, today)
                 : null;
               const open = group.rows.filter(
                 (r) => r.status === "scheduled" || r.status === "in_progress",
               );
               const extraHk = extraHousekeepingTasks(
                 group.assigneeId || group.employee?.id,
-                group.rows,
+                duties,
                 housekeepingTasks,
               );
-              const onHousekeepingDuty = group.rows.some((r) => r.category === "Housekeeping");
+              const onHousekeepingDuty =
+                extraHk.length > 0 ||
+                group.rows.some((r) => r.category === "Housekeeping" || isRoomDuty(r));
               return (
                 <Card key={group.assigneeId || group.name}>
                   <CardHeader
@@ -718,18 +780,16 @@ export function DutiesRosterPage() {
                   {group.employee?.designation ? (
                     <p className="-mt-2 mb-3 text-xs text-muted">{group.employee.designation}</p>
                   ) : null}
-                  {onHousekeepingDuty || extraHk.length > 0 ? (
+                  {onHousekeepingDuty ? (
                     <p className="-mt-1 mb-3 text-xs text-muted">
-                      Housekeeping rooms assigned to this person also show here. Finishing a room
-                      in Housekeeping awards {HOUSEKEEPING_DUTY_POINTS} points.
+                      Room cleans from Housekeeping. Done rooms add +{HOUSEKEEPING_DUTY_POINTS}{" "}
+                      points.
                     </p>
                   ) : null}
                   <ul className="space-y-2">
                     {group.rows.map((row) => {
-                      const linkedHk = row.housekeepingTaskId
-                        ? housekeepingTasks.find((t) => t.id === row.housekeepingTaskId)
-                        : null;
-                      const fromHousekeeping = Boolean(row.housekeepingTaskId);
+                      const fromHousekeeping = isRoomDuty(row);
+                      const pts = dutyPoints(row);
                       return (
                       <li
                         key={row.id}
@@ -743,23 +803,27 @@ export function DutiesRosterPage() {
                             {row.title}
                           </p>
                           <p className="mt-0.5 text-xs text-muted">
-                            {row.category} · {row.shift} · {dutyPoints(row)} pts
-                            {row.checkedInBy ? ` · in by ${row.checkedInBy}` : ""}
-                            {linkedHk
-                              ? ` · ${hkStatusLabel[linkedHk.status]}`
-                              : fromHousekeeping
-                                ? " · from Housekeeping"
-                                : ""}
+                            {fromHousekeeping ? "Housekeeping" : row.category}
+                            {" · "}
+                            {row.shift}
+                            {row.checkedInBy && !fromHousekeeping
+                              ? ` · in by ${row.checkedInBy}`
+                              : ""}
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-1.5">
+                          {row.status === "completed" ? (
+                            <Badge tone="success">+{pts} pts</Badge>
+                          ) : (
+                            <Badge tone="gold">{pts} pts</Badge>
+                          )}
                           <Badge tone={statusTone[row.status]}>{statusLabel[row.status]}</Badge>
                           {fromHousekeeping ? (
                             <Link
                               to="/housekeeping"
                               className="inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-semibold text-[var(--accent)] hover:underline"
                             >
-                              Open in Housekeeping
+                              Housekeeping
                             </Link>
                           ) : null}
                           {!fromHousekeeping && row.status === "scheduled" ? (
@@ -782,7 +846,7 @@ export function DutiesRosterPage() {
                               Done
                             </Button>
                           ) : null}
-                          {open.includes(row) ? (
+                          {!fromHousekeeping && open.includes(row) ? (
                             <Button
                               size="sm"
                               variant="danger"
@@ -799,19 +863,17 @@ export function DutiesRosterPage() {
                     {extraHk.map((task) => (
                       <li
                         key={`hk-${task.id}`}
-                        className="flex flex-col gap-2 rounded-xl border border-dashed border-app bg-app px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                        className="flex flex-col gap-2 rounded-xl border border-app bg-app px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div className="min-w-0">
                           <p className="flex flex-wrap items-center gap-1.5 font-semibold">
                             <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
                             Clean Room {task.roomNumber}
                           </p>
-                          <p className="mt-0.5 text-xs text-muted">
-                            Housekeeping · {HOUSEKEEPING_DUTY_POINTS} pts when done ·{" "}
-                            {hkStatusLabel[task.status]}
-                          </p>
+                          <p className="mt-0.5 text-xs text-muted">Housekeeping</p>
                         </div>
                         <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge tone="gold">{HOUSEKEEPING_DUTY_POINTS} pts</Badge>
                           <Badge tone={task.status === "in_progress" ? "info" : "gold"}>
                             {hkStatusLabel[task.status]}
                           </Badge>
@@ -819,7 +881,7 @@ export function DutiesRosterPage() {
                             to="/housekeeping"
                             className="inline-flex h-8 items-center rounded-lg px-2.5 text-xs font-semibold text-[var(--accent)] hover:underline"
                           >
-                            Open in Housekeeping
+                            Housekeeping
                           </Link>
                         </div>
                       </li>
@@ -956,7 +1018,8 @@ export function DutiesRosterPage() {
                 </Tr>
               ) : (
                 filtered.map((row) => {
-                  const fromHousekeeping = Boolean(row.housekeepingTaskId);
+                  const fromHousekeeping = isRoomDuty(row);
+                  const pts = dutyPoints(row);
                   return (
                   <Tr key={row.id}>
                     <Td>
@@ -967,8 +1030,8 @@ export function DutiesRosterPage() {
                         {row.title}
                       </p>
                       <p className="mt-0.5 text-xs text-muted">
-                        {row.category} · {formatDutyDate(row.date)} · {row.shift}
-                        {fromHousekeeping ? " · room task" : ""}
+                        {fromHousekeeping ? "Housekeeping" : row.category} ·{" "}
+                        {formatDutyDate(row.date || today)} · {row.shift}
                       </p>
                     </Td>
                     <Td>
@@ -978,7 +1041,9 @@ export function DutiesRosterPage() {
                         <span className="text-muted">Unassigned</span>
                       )}
                     </Td>
-                    <Td>{dutyPoints(row)}</Td>
+                    <Td className={row.status === "completed" ? "font-semibold text-emerald-700 dark:text-emerald-400" : ""}>
+                      {row.status === "completed" ? `+${pts}` : pts}
+                    </Td>
                     <Td className="text-muted">{row.checkedInBy || "—"}</Td>
                     <Td className="text-muted">{row.checkedOutBy || "—"}</Td>
                     <Td>
@@ -1035,7 +1100,8 @@ export function DutiesRosterPage() {
                             Complete
                           </Button>
                         ) : null}
-                        {row.status === "scheduled" || row.status === "in_progress" ? (
+                        {!fromHousekeeping &&
+                        (row.status === "scheduled" || row.status === "in_progress") ? (
                           <Button
                             size="sm"
                             variant="danger"
