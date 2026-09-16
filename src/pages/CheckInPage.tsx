@@ -17,6 +17,7 @@ import {
   sendGuestCheckInEmail,
 } from "../lib/guestEmail";
 import {
+  isStayBillingUnset,
   paymentBadge,
   paymentPlanLabel,
   paymentSplitLine,
@@ -33,6 +34,7 @@ import {
   updateCheckIn,
   type CheckInCompanion,
   type CheckInRecord,
+  type PaymentMethod,
   type PaymentTiming,
 } from "../services/checkIns";
 import { subscribeRooms, type HotelRoom } from "../services/rooms";
@@ -63,6 +65,56 @@ const PAYMENT_OPTIONS: { value: PaymentTiming; label: string; description: strin
     description: "Nothing collected now; full bill when they leave.",
   },
 ];
+
+const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string; description: string }[] =
+  [
+    { value: "cash", label: "Cash", description: "Physical cash at the counter." },
+    { value: "card", label: "Card", description: "Debit or credit card." },
+    {
+      value: "online",
+      label: "Online / bank transfer",
+      description: "JazzCash, bank transfer, or other digital payment.",
+    },
+  ];
+
+function resolveTaxFromSelect(
+  taxSelect: string,
+  customTaxPercent: string,
+  taxRates: TaxRate[],
+  taxAppliesToRoom: boolean,
+) {
+  const selectedTax =
+    taxSelect !== "none" && taxSelect !== "custom"
+      ? taxRates.find((t) => t.id === taxSelect)
+      : null;
+  const taxPercent =
+    taxSelect === "none"
+      ? 0
+      : taxSelect === "custom"
+        ? Math.max(0, Math.min(100, Number(customTaxPercent) || 0))
+        : (selectedTax?.percent ?? 0);
+  const taxLabel =
+    taxSelect === "custom"
+      ? `GST ${taxPercent}%`
+      : selectedTax
+        ? selectedTax.name
+        : "";
+  return {
+    taxPercent,
+    taxLabel,
+    taxRateId: selectedTax?.id ?? null,
+    taxAppliesToRoom: taxSelect === "none" ? true : taxAppliesToRoom,
+    taxAppliesToFood: false,
+  };
+}
+
+function showBillingFieldsForTiming(timing: PaymentTiming) {
+  return (
+    timing === "paid_at_checkin" ||
+    timing === "partial" ||
+    timing === "due_on_checkout"
+  );
+}
 
 function toLocalInputValue(date: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -158,7 +210,6 @@ function BillSummary({
   taxPercent,
   taxAmount,
   taxAppliesToRoom,
-  taxAppliesToFood,
   totalBill,
   rs,
   paymentTiming,
@@ -176,7 +227,6 @@ function BillSummary({
   taxPercent?: number;
   taxAmount?: number;
   taxAppliesToRoom?: boolean;
-  taxAppliesToFood?: boolean;
   totalBill: number;
   rs: string;
   paymentTiming: PaymentTiming;
@@ -216,15 +266,8 @@ function BillSummary({
           <p className="flex justify-between gap-3">
             <span className="text-muted">
               {taxLabel || "GST"} ({taxPercent}%)
-              {taxAppliesToRoom || taxAppliesToFood ? (
-                <span className="block text-xs font-normal opacity-80">
-                  {[
-                    taxAppliesToRoom ? "Room" : null,
-                    taxAppliesToFood ? "Food" : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
+              {taxAppliesToRoom ? (
+                <span className="block text-xs font-normal opacity-80">Room</span>
               ) : null}
             </span>
             <span className="font-semibold">{formatRs(taxAmount ?? 0, rs)}</span>
@@ -353,9 +396,18 @@ export function CheckInPage() {
   const [taxSelect, setTaxSelect] = useState("none");
   const [customTaxPercent, setCustomTaxPercent] = useState("");
   const [taxAppliesToRoom, setTaxAppliesToRoom] = useState(true);
-  const [taxAppliesToFood, setTaxAppliesToFood] = useState(true);
+  const [formPaymentMethod, setFormPaymentMethod] = useState<PaymentMethod | "">("");
+  const [checkoutDiscountPercent, setCheckoutDiscountPercent] = useState("");
+  const [checkoutTaxSelect, setCheckoutTaxSelect] = useState("none");
+  const [checkoutCustomTaxPercent, setCheckoutCustomTaxPercent] = useState("");
+  const [checkoutTaxAppliesToRoom, setCheckoutTaxAppliesToRoom] = useState(true);
+  const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState<PaymentMethod | "">("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const showBillingAtCheckIn = showBillingFieldsForTiming(form.paymentTiming);
+  const collectPaymentNow =
+    form.paymentTiming === "paid_at_checkin" || form.paymentTiming === "partial";
 
   useEffect(() => {
     const unsubRooms = subscribeRooms(setRooms);
@@ -395,27 +447,19 @@ export function CheckInPage() {
 
   const liveBill = useMemo(() => {
     const rate = nightlyRate || selectedRoom?.rate || 0;
-    const pct = clampDiscountPercent(discountPercent);
-    const selectedTax =
-      taxSelect !== "none" && taxSelect !== "custom"
-        ? taxRates.find((t) => t.id === taxSelect)
-        : null;
-    const taxPercent =
-      taxSelect === "none"
-        ? 0
-        : taxSelect === "custom"
-          ? Math.max(0, Math.min(100, Number(customTaxPercent) || 0))
-          : (selectedTax?.percent ?? 0);
-    const taxLabel =
-      taxSelect === "custom"
-        ? `GST ${taxPercent}%`
-        : selectedTax
-          ? selectedTax.name
-          : "";
+    const pct = showBillingAtCheckIn ? clampDiscountPercent(discountPercent) : 0;
+    const resolved = showBillingAtCheckIn
+      ? resolveTaxFromSelect(
+          taxSelect,
+          customTaxPercent,
+          taxRates,
+          taxAppliesToRoom,
+        )
+      : resolveTaxFromSelect("none", "", taxRates, true);
     const taxOpts = {
-      taxPercent,
-      taxAppliesToRoom: taxSelect === "none" ? true : taxAppliesToRoom,
-      taxAppliesToFood: taxSelect === "none" ? true : taxAppliesToFood,
+      taxPercent: resolved.taxPercent,
+      taxAppliesToRoom: resolved.taxAppliesToRoom,
+      taxAppliesToFood: resolved.taxAppliesToFood,
     };
 
     const empty = {
@@ -428,12 +472,12 @@ export function CheckInPage() {
       roomCharges: 0,
       extraCharges,
       subtotal: extraCharges,
-      taxPercent,
+      taxPercent: resolved.taxPercent,
       taxAppliesToRoom: taxOpts.taxAppliesToRoom,
       taxAppliesToFood: taxOpts.taxAppliesToFood,
       taxAmount: 0,
-      taxLabel,
-      taxRateId: selectedTax?.id ?? null,
+      taxLabel: resolved.taxLabel,
+      taxRateId: resolved.taxRateId,
       totalBill: extraCharges,
     };
 
@@ -449,7 +493,11 @@ export function CheckInPage() {
         pct,
         taxOpts,
       );
-      return { ...bill, taxLabel, taxRateId: selectedTax?.id ?? null };
+      return {
+        ...bill,
+        taxLabel: resolved.taxLabel,
+        taxRateId: resolved.taxRateId,
+      };
     } catch {
       const bill = calcRoomBill(
         rate,
@@ -459,7 +507,11 @@ export function CheckInPage() {
         pct,
         taxOpts,
       );
-      return { ...bill, taxLabel, taxRateId: selectedTax?.id ?? null };
+      return {
+        ...bill,
+        taxLabel: resolved.taxLabel,
+        taxRateId: resolved.taxRateId,
+      };
     }
   }, [
     form.checkInAt,
@@ -471,8 +523,8 @@ export function CheckInPage() {
     taxSelect,
     customTaxPercent,
     taxAppliesToRoom,
-    taxAppliesToFood,
     taxRates,
+    showBillingAtCheckIn,
   ]);
 
   const partySize = Math.max(1, Number(form.adults || 1) + Number(form.children || 0));
@@ -500,7 +552,7 @@ export function CheckInPage() {
     setTaxSelect("none");
     setCustomTaxPercent("");
     setTaxAppliesToRoom(true);
-    setTaxAppliesToFood(true);
+    setFormPaymentMethod("");
     setFormError(null);
     setEditingId(null);
     setLockedRoomId(null);
@@ -548,7 +600,6 @@ export function CheckInPage() {
     setTaxSelect("none");
     setCustomTaxPercent("");
     setTaxAppliesToRoom(true);
-    setTaxAppliesToFood(true);
     setFormError(null);
     setEditingId(null);
     setLockedRoomId(room.id);
@@ -613,7 +664,7 @@ export function CheckInPage() {
       setCustomTaxPercent("");
     }
     setTaxAppliesToRoom(row.taxAppliesToRoom !== false);
-    setTaxAppliesToFood(row.taxAppliesToFood !== false);
+    setFormPaymentMethod(row.checkInPaymentMethod ?? "");
     setExistingCnicFrontUrl(row.cnicFrontImageUrl || row.cnicImageUrl);
     setExistingCnicBackUrl(row.cnicBackImageUrl);
     setFormError(null);
@@ -640,6 +691,11 @@ export function CheckInPage() {
     setCheckoutPaymentPaid(
       resolveBalanceDue(row) <= 0 || row.paymentStatus === "paid",
     );
+    setCheckoutDiscountPercent("");
+    setCheckoutTaxSelect("none");
+    setCheckoutCustomTaxPercent("");
+    setCheckoutTaxAppliesToRoom(true);
+    setCheckoutPaymentMethod("");
     setCheckedOutBy(staffDisplayName);
     setPasswordModal(true);
   }
@@ -654,18 +710,59 @@ export function CheckInPage() {
     setPasswordModal(true);
   }
 
+  const needsCheckoutBilling = useMemo(() => {
+    if (!pendingEdit || secureAction !== "checkout") return false;
+    if (!isStayBillingUnset(pendingEdit)) return false;
+    return resolveBalanceDue(pendingEdit) > 0;
+  }, [pendingEdit, secureAction]);
+
   const checkoutPreview = useMemo(() => {
     if (!pendingEdit || secureAction !== "checkout") return null;
+    const checkoutTax = needsCheckoutBilling
+      ? resolveTaxFromSelect(
+          checkoutTaxSelect,
+          checkoutCustomTaxPercent,
+          taxRates,
+          checkoutTaxAppliesToRoom,
+        )
+      : null;
+    const discount = needsCheckoutBilling
+      ? clampDiscountPercent(checkoutDiscountPercent)
+      : pendingEdit.discountPercent || 0;
+    const taxOpts = needsCheckoutBilling
+      ? {
+          taxPercent: checkoutTax!.taxPercent,
+          taxAppliesToRoom: checkoutTax!.taxAppliesToRoom,
+          taxAppliesToFood: checkoutTax!.taxAppliesToFood,
+        }
+      : taxOptionsFromStay(pendingEdit);
     return calcCheckoutBill(
       pendingEdit.nightlyRate,
       pendingEdit.checkInAt,
       pendingEdit.plannedCheckOutAt || pendingEdit.checkOutAt,
       new Date().toISOString(),
       pendingEdit.extraCharges || 0,
-      pendingEdit.discountPercent || 0,
-      taxOptionsFromStay(pendingEdit),
+      discount,
+      taxOpts,
     );
-  }, [pendingEdit, secureAction]);
+  }, [
+    pendingEdit,
+    secureAction,
+    needsCheckoutBilling,
+    checkoutDiscountPercent,
+    checkoutTaxSelect,
+    checkoutCustomTaxPercent,
+    checkoutTaxAppliesToRoom,
+    taxRates,
+  ]);
+
+  const checkoutBalanceDue = useMemo(() => {
+    if (!pendingEdit || secureAction !== "checkout") return 0;
+    return Math.max(
+      0,
+      (checkoutPreview?.totalBill ?? pendingEdit.totalBill) - resolveAmountPaid(pendingEdit),
+    );
+  }, [pendingEdit, secureAction, checkoutPreview]);
 
   function closePasswordModal() {
     if (verifyingPassword || checkingOutId) return;
@@ -701,6 +798,11 @@ export function CheckInPage() {
         );
         return;
       }
+      if (balanceNow > 0 && checkoutPaymentPaid && !checkoutPaymentMethod) {
+        setPasswordError("Select how the guest paid (cash, card, or online).");
+        return;
+      }
+
     }
 
     setVerifyingPassword(true);
@@ -747,11 +849,38 @@ export function CheckInPage() {
       const nowIso = new Date().toISOString();
       setCheckingOutId(row.id);
       try {
+        const checkoutTax = needsCheckoutBilling
+          ? resolveTaxFromSelect(
+              checkoutTaxSelect,
+              checkoutCustomTaxPercent,
+              taxRates,
+              checkoutTaxAppliesToRoom,
+            )
+          : null;
+        const balanceAtCheckout = Math.max(
+          0,
+          (checkoutPreview?.totalBill ?? row.totalBill) - resolveAmountPaid(row),
+        );
         const result = await checkoutGuest(row.id, {
           mode: "manual",
           at: nowIso,
           checkedOutBy: checkedOutBy.trim(),
           paymentReceived: true,
+          ...(needsCheckoutBilling && checkoutTax
+            ? {
+                billing: {
+                  discountPercent: clampDiscountPercent(checkoutDiscountPercent),
+                  taxRateId: checkoutTax.taxRateId,
+                  taxLabel: checkoutTax.taxLabel,
+                  taxPercent: checkoutTax.taxPercent,
+                  taxAppliesToRoom: checkoutTax.taxAppliesToRoom,
+                  taxAppliesToFood: checkoutTax.taxAppliesToFood,
+                },
+                checkoutPaymentMethod: checkoutPaymentMethod || null,
+              }
+            : balanceAtCheckout > 0 && checkoutPaymentMethod
+              ? { checkoutPaymentMethod: checkoutPaymentMethod }
+              : {}),
         });
         setPasswordModal(false);
         setPendingEdit(null);
@@ -864,8 +993,10 @@ export function CheckInPage() {
       }
     }
 
-    if (taxSelect !== "none" && !taxAppliesToRoom && !taxAppliesToFood) {
-      setFormError("Turn on GST for room, food, or both.");
+
+
+    if (collectPaymentNow && showBillingAtCheckIn && !formPaymentMethod) {
+      setFormError("Select how the guest paid (cash, card, or online).");
       return;
     }
 
@@ -929,6 +1060,8 @@ export function CheckInPage() {
           taxPercent: liveBill.taxPercent,
           taxAppliesToRoom: liveBill.taxAppliesToRoom,
           taxAppliesToFood: liveBill.taxAppliesToFood,
+          checkInPaymentMethod:
+            collectPaymentNow && formPaymentMethod ? formPaymentMethod : null,
         });
         toastSuccess("Check-in updated", `Bill is now ${formatRs(liveBill.totalBill, t.common.rs)}`);
       } else {
@@ -963,6 +1096,8 @@ export function CheckInPage() {
           taxPercent: liveBill.taxPercent,
           taxAppliesToRoom: liveBill.taxAppliesToRoom,
           taxAppliesToFood: liveBill.taxAppliesToFood,
+          checkInPaymentMethod:
+            collectPaymentNow && formPaymentMethod ? formPaymentMethod : null,
         });
 
         const splitPaid =
@@ -1301,7 +1436,6 @@ export function CheckInPage() {
                       taxPercent={viewRow.taxPercent || viewBill.taxPercent}
                       taxAmount={viewRow.taxAmount || viewBill.taxAmount}
                       taxAppliesToRoom={viewRow.taxAppliesToRoom !== false}
-                      taxAppliesToFood={viewRow.taxAppliesToFood !== false}
                       totalBill={viewRow.totalBill || viewBill.totalBill}
                       rs={t.common.rs}
                       paymentTiming={viewRow.paymentTiming}
@@ -1414,13 +1548,9 @@ export function CheckInPage() {
                 Boolean(checkingOutId) ||
                 (secureAction === "checkout" &&
                   pendingEdit != null &&
-                  (checkoutPreview
-                    ? Math.max(
-                        0,
-                        checkoutPreview.totalBill - resolveAmountPaid(pendingEdit),
-                      )
-                    : resolveBalanceDue(pendingEdit)) > 0 &&
-                  !checkoutPaymentPaid)
+                  checkoutBalanceDue > 0 &&
+                  (!checkoutPaymentPaid ||
+                    (checkoutPaymentPaid && !checkoutPaymentMethod)))
               }
             >
               {verifyingPassword || checkingOutId
@@ -1530,28 +1660,111 @@ export function CheckInPage() {
                   placeholder="Staff name"
                 />
               </Field>
+              {needsCheckoutBilling ? (
+                <div className="space-y-4 rounded-xl border border-app bg-app p-4">
+                  <p className="text-sm font-bold text-app">Bill at checkout</p>
+                  <p className="text-xs text-muted">
+                    No discount or GST was set at check-in — add them now before collecting payment.
+                  </p>
+                  <Field label="Room discount (%)">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step="0.01"
+                      value={checkoutDiscountPercent}
+                      onChange={(e) => setCheckoutDiscountPercent(e.target.value)}
+                      placeholder="0"
+                    />
+                  </Field>
+                  <SelectField label="Sales tax / GST">
+                    <FancySelect
+                      value={checkoutTaxSelect}
+                      onChange={(value) => {
+                        setCheckoutTaxSelect(value);
+                        if (value === "none") {
+                          setCheckoutCustomTaxPercent("");
+                          setCheckoutTaxAppliesToRoom(true);
+                          return;
+                        }
+                        if (value === "custom") {
+                          setCheckoutTaxAppliesToRoom(true);
+                          return;
+                        }
+                        setCheckoutCustomTaxPercent("");
+                        setCheckoutTaxAppliesToRoom(true);
+                      }}
+                      options={[
+                        { value: "none", label: "No tax", description: "Bill without GST." },
+                        ...taxRates
+                          .filter((tr) => tr.active)
+                          .map((tr) => ({
+                            value: tr.id,
+                            label: `${tr.name} (${tr.percent}%)`,
+                            description: `${tr.percent}% sales tax`,
+                          })),
+                        {
+                          value: "custom",
+                          label: "Custom %",
+                          description: "Enter a one-off GST percentage.",
+                        },
+                      ]}
+                    />
+                  </SelectField>
+                  {checkoutTaxSelect === "custom" ? (
+                    <Field label="Custom GST %">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.01"
+                        value={checkoutCustomTaxPercent}
+                        onChange={(e) => setCheckoutCustomTaxPercent(e.target.value)}
+                        placeholder="e.g. 18"
+                      />
+                    </Field>
+                  ) : null}
+
+                </div>
+              ) : null}
+              {checkoutBalanceDue > 0 ? (
+                <SelectField label="Payment method">
+                  <FancySelect
+                    value={checkoutPaymentMethod || ""}
+                    onChange={(value) =>
+                      setCheckoutPaymentMethod(value as PaymentMethod)
+                    }
+                    options={[
+                      {
+                        value: "",
+                        label: "Select method…",
+                        description: "Required when collecting the balance.",
+                      },
+                      ...PAYMENT_METHOD_OPTIONS,
+                    ]}
+                  />
+                </SelectField>
+              ) : null}
               <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-app bg-app px-4 py-3">
                 <input
                   type="checkbox"
                   className="mt-1 h-4 w-4 accent-[var(--accent)]"
                   checked={
-                    resolveBalanceDue(pendingEdit) <= 0 ||
+                    checkoutBalanceDue <= 0 ||
                     pendingEdit.paymentStatus === "paid" ||
                     checkoutPaymentPaid
                   }
-                  disabled={
-                    resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
-                  }
+                  disabled={checkoutBalanceDue <= 0 || pendingEdit.paymentStatus === "paid"}
                   onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
                 />
                 <span className="min-w-0 text-sm">
                   <span className="font-bold text-app">
-                    {resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
+                    {checkoutBalanceDue <= 0 || pendingEdit.paymentStatus === "paid"
                       ? "Payment paid"
                       : "Remaining balance paid (required)"}
                   </span>
                   <span className="mt-0.5 block text-xs text-muted">
-                    {resolveBalanceDue(pendingEdit) <= 0 || pendingEdit.paymentStatus === "paid"
+                    {checkoutBalanceDue <= 0 || pendingEdit.paymentStatus === "paid"
                       ? "Bill already settled — stays marked paid."
                       : "Guest cannot check out until the remaining bill is collected. Check this after payment."}
                   </span>
@@ -1697,6 +1910,48 @@ export function CheckInPage() {
                   onChange={(e) => setForm((p) => ({ ...p, checkOutAt: e.target.value }))}
                 />
               </Field>
+              <SelectField label="Room payment" className="sm:col-span-2">
+                <FancySelect
+                  value={form.paymentTiming}
+                  onChange={(paymentTiming) => {
+                    const timing = paymentTiming as PaymentTiming;
+                    setForm((p) => ({
+                      ...p,
+                      paymentTiming: timing,
+                      amountPaidAtCheckIn:
+                        timing === "partial" ? p.amountPaidAtCheckIn : "",
+                    }));
+                    if (timing === "due_on_checkout") {
+                      setFormPaymentMethod("");
+                    }
+                  }}
+                  options={PAYMENT_OPTIONS.map((o) => ({
+                    value: o.value,
+                    label: o.label,
+                    description: o.description,
+                  }))}
+                />
+              </SelectField>
+              {form.paymentTiming === "partial" ? (
+                <Field label="Cash paid at check-in" className="sm:col-span-2">
+                  <Input
+                    required
+                    type="number"
+                    min={1}
+                    step="1"
+                    value={form.amountPaidAtCheckIn}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, amountPaidAtCheckIn: e.target.value }))
+                    }
+                    placeholder="e.g. 5000"
+                  />
+                  <p className="mt-1 text-xs text-muted">
+                    Remaining balance will be due when the guest checks out.
+                  </p>
+                </Field>
+              ) : null}
+              {showBillingAtCheckIn ? (
+                <>
               <Field label="Room discount (%)" className="sm:col-span-2">
                 <Input
                   type="number"
@@ -1719,17 +1974,14 @@ export function CheckInPage() {
                     if (value === "none") {
                       setCustomTaxPercent("");
                       setTaxAppliesToRoom(true);
-                      setTaxAppliesToFood(true);
                       return;
                     }
                     if (value === "custom") {
                       setTaxAppliesToRoom(true);
-                      setTaxAppliesToFood(true);
                       return;
                     }
                     setCustomTaxPercent("");
                     setTaxAppliesToRoom(true);
-                    setTaxAppliesToFood(true);
                   }}
                   options={[
                     { value: "none", label: "No tax", description: "Bill without GST." },
@@ -1761,69 +2013,22 @@ export function CheckInPage() {
                   />
                 </Field>
               ) : null}
-              {taxSelect !== "none" ? (
-                <div className="sm:col-span-2 rounded-xl border border-app bg-app px-3 py-3">
-                  <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
-                    Apply GST to
-                  </p>
-                  <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center gap-2 text-sm font-medium">
-                      <input
-                        type="checkbox"
-                        checked={taxAppliesToRoom}
-                        onChange={(e) => setTaxAppliesToRoom(e.target.checked)}
-                      />
-                      Room charges
-                    </label>
-                    <label className="flex items-center gap-2 text-sm font-medium">
-                      <input
-                        type="checkbox"
-                        checked={taxAppliesToFood}
-                        onChange={(e) => setTaxAppliesToFood(e.target.checked)}
-                      />
-                      Food / extras
-                    </label>
-                  </div>
-                  <p className="mt-2 text-xs text-muted">
-                    Tick both if GST should apply to room and food orders on this stay.
-                  </p>
-                </div>
-              ) : null}
-              <SelectField label="Room payment" className="sm:col-span-2">
-                <FancySelect
-                  value={form.paymentTiming}
-                  onChange={(paymentTiming) =>
-                    setForm((p) => ({
-                      ...p,
-                      paymentTiming: paymentTiming as PaymentTiming,
-                      amountPaidAtCheckIn:
-                        paymentTiming === "partial" ? p.amountPaidAtCheckIn : "",
-                    }))
-                  }
-                  options={PAYMENT_OPTIONS.map((o) => ({
-                    value: o.value,
-                    label: o.label,
-                    description: o.description,
-                  }))}
-                />
-              </SelectField>
-              {form.paymentTiming === "partial" ? (
-                <Field label="Cash paid at check-in" className="sm:col-span-2">
-                  <Input
-                    required
-                    type="number"
-                    min={1}
-                    step="1"
-                    value={form.amountPaidAtCheckIn}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, amountPaidAtCheckIn: e.target.value }))
+
+              {collectPaymentNow ? (
+                <SelectField label="Payment method" className="sm:col-span-2">
+                  <FancySelect
+                    value={formPaymentMethod || ""}
+                    onChange={(value) =>
+                      setFormPaymentMethod(value as PaymentMethod)
                     }
-                    placeholder="e.g. 5000"
+                    options={[
+                      { value: "", label: "Select method…", description: "Required when collecting payment now." },
+                      ...PAYMENT_METHOD_OPTIONS,
+                    ]}
                   />
-                  <p className="mt-1 text-xs text-muted">
-                    Remaining balance will be due when the guest checks out.
-                  </p>
-                </Field>
+                </SelectField>
+              ) : null}
+                </>
               ) : null}
             </div>
           </div>
@@ -1843,7 +2048,6 @@ export function CheckInPage() {
                 taxPercent={liveBill.taxPercent}
                 taxAmount={liveBill.taxAmount}
                 taxAppliesToRoom={liveBill.taxAppliesToRoom}
-                taxAppliesToFood={liveBill.taxAppliesToFood}
                 totalBill={liveBill.totalBill}
                 rs={t.common.rs}
                 paymentTiming={form.paymentTiming}

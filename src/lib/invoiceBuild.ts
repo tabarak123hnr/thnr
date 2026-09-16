@@ -1,10 +1,6 @@
 import { calcRoomBill, roundMoney, taxOptionsFromStay } from "./billing";
-import type { CheckInRecord, PaymentStatus, PaymentTiming } from "../types/checkIn";
-import {
-  orderTaxAmount,
-  orderTicketTotal,
-  type FoodOrder,
-} from "../types/order";
+import type { CheckInRecord, PaymentMethod, PaymentStatus, PaymentTiming } from "../types/checkIn";
+import { type FoodOrder } from "../types/order";
 import {
   invoiceListStatus,
   type GuestInvoice,
@@ -67,36 +63,59 @@ function stayOrdersFor(row: CheckInRecord, orders: FoodOrder[]) {
   return orders.filter((o) => o.checkInId === row.id);
 }
 
-/**
- * GST for food folio — once only per rupee of food:
- * use each ticket’s stored GST when present; otherwise stay food GST %.
- * Never add order tax and stay tax on the same ticket.
- */
-function foodGstForOrders(row: CheckInRecord, stayOrders: FoodOrder[], foodTotal: number) {
-  const stayPct = row.taxPercent || 0;
-  const stayFood = row.taxAppliesToFood && stayPct > 0;
-
-  let taxAmount = 0;
-  let taxPercent = 0;
-
-  for (const o of stayOrders) {
-    const stored = orderTaxAmount(o);
-    if (stored > 0 || (Number(o.taxPercent) || 0) > 0) {
-      taxAmount += stored;
-      taxPercent = Number(o.taxPercent) || taxPercent || stayPct;
-    } else if (stayFood) {
-      taxAmount += roundMoney(((o.amount || 0) * stayPct) / 100);
-      taxPercent = stayPct;
-    }
+/** GST on the guest’s overall food total (not per kitchen ticket). */
+function foodGstForStay(row: CheckInRecord, foodTotal: number) {
+  const pct = Number(row.foodTaxPercent ?? 0) || 0;
+  if (pct <= 0 || foodTotal <= 0) {
+    return { taxAmount: 0, taxPercent: 0, taxLabel: "" };
   }
+  const taxAmount = roundMoney((foodTotal * pct) / 100);
+  const taxLabel =
+    (row.foodTaxLabel || "").trim() || `GST ${pct}%`;
+  return { taxAmount, taxPercent: pct, taxLabel };
+}
 
-  taxAmount = roundMoney(taxAmount);
-  if (taxAmount <= 0 && stayFood && foodTotal > 0) {
-    taxAmount = roundMoney((foodTotal * stayPct) / 100);
-    taxPercent = stayPct;
+function formatPaymentMethodName(m: PaymentMethod | string | null | undefined): string {
+  if (!m) return "";
+  const s = String(m).trim().toLowerCase();
+  if (s === "cash") return "Cash";
+  if (s === "card") return "Card";
+  if (s === "online") return "Online";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function resolveRoomPaymentMethod(row: CheckInRecord, settled: boolean): string | null {
+  const inMethod = row.checkInPaymentMethod ? formatPaymentMethodName(row.checkInPaymentMethod) : null;
+  const outMethod = row.checkoutPaymentMethod ? formatPaymentMethodName(row.checkoutPaymentMethod) : null;
+  if (inMethod && outMethod && inMethod !== outMethod) {
+    return `${inMethod}, ${outMethod}`;
   }
+  if (settled && outMethod) return outMethod;
+  if (outMethod) return outMethod;
+  if (inMethod) return inMethod;
+  return null;
+}
 
-  return { taxAmount, taxPercent };
+function resolveFoodPaymentMethod(row: CheckInRecord, settled: boolean): string | null {
+  if (row.foodBillPaymentMethod) {
+    return formatPaymentMethodName(row.foodBillPaymentMethod);
+  }
+  if (settled && row.checkoutPaymentMethod) {
+    return formatPaymentMethodName(row.checkoutPaymentMethod);
+  }
+  if (row.checkInPaymentMethod && (row.paymentStatus === "paid" || row.paymentTiming === "paid_at_checkin")) {
+    return formatPaymentMethodName(row.checkInPaymentMethod);
+  }
+  return null;
+}
+
+function resolveOverallPaymentMethod(row: CheckInRecord): string | null {
+  const methods = new Set<string>();
+  if (row.checkInPaymentMethod) methods.add(formatPaymentMethodName(row.checkInPaymentMethod));
+  if (row.checkoutPaymentMethod) methods.add(formatPaymentMethodName(row.checkoutPaymentMethod));
+  if (row.foodBillPaymentMethod) methods.add(formatPaymentMethodName(row.foodBillPaymentMethod));
+  if (!methods.size) return null;
+  return Array.from(methods).join(", ");
 }
 
 function guestBase(row: CheckInRecord) {
@@ -156,10 +175,10 @@ export function buildRoomInvoice(
   const settled = isStaySettled(row);
 
   const foodPaidTickets = settled
-    ? stayOrders.reduce((s, o) => s + orderTicketTotal(o), 0)
+    ? stayOrders.reduce((s, o) => s + (o.amount || 0), 0)
     : stayOrders
         .filter((o) => o.paymentStatus === "paid")
-        .reduce((s, o) => s + orderTicketTotal(o), 0);
+        .reduce((s, o) => s + (o.amount || 0), 0);
 
   const otherExtras = Math.max(0, (bill.extraCharges || 0) - foodPretax);
   const pct = bill.taxPercent || 0;
@@ -209,6 +228,7 @@ export function buildRoomInvoice(
     balanceDue: split.balanceDue,
     paymentStatus: split.paymentStatus,
     paymentTiming,
+    paymentMethod: resolveRoomPaymentMethod(row, settled),
     type: "room",
   };
 }
@@ -226,14 +246,21 @@ export function buildFoodInvoice(
   const foodTotal = foodLines.reduce((s, l) => s + l.amount, 0);
   if (foodTotal <= 0) return null;
 
-  const { taxAmount, taxPercent } = foodGstForOrders(row, stayOrders, foodTotal);
+  const { taxAmount, taxPercent, taxLabel: foodTaxLabel } = foodGstForStay(row, foodTotal);
   const folioTotal = roundMoney(foodTotal + taxAmount);
 
-  const foodPaid = settled
-    ? folioTotal
+  const foodCleared = Boolean(row.foodBillClearedAt);
+  const foodPaidPretax = settled
+    ? foodTotal
     : stayOrders
         .filter((o) => o.paymentStatus === "paid")
-        .reduce((s, o) => s + orderTicketTotal(o), 0);
+        .reduce((s, o) => s + (o.amount || 0), 0);
+  const foodPaid =
+    foodCleared || settled
+      ? folioTotal
+      : taxAmount > 0 && foodTotal > 0
+        ? roundMoney(foodPaidPretax + (foodPaidPretax / foodTotal) * taxAmount)
+        : foodPaidPretax;
   const split = paymentFromSplit(folioTotal, foodPaid);
 
   let paymentTiming: PaymentTiming = "due_on_checkout";
@@ -244,11 +271,8 @@ export function buildFoodInvoice(
 
   return {
     ...base,
-    taxPercent: taxPercent || base.taxPercent,
-    taxLabel:
-      taxAmount > 0
-        ? base.taxLabel || `GST ${taxPercent || base.taxPercent}%`
-        : "",
+    taxPercent,
+    taxLabel: taxAmount > 0 ? foodTaxLabel : "",
     id: `${row.id}-food`,
     number: foodInvoiceNumber(row.id, row.roomNumber, row.checkInAt),
     nights: 0,
@@ -268,6 +292,7 @@ export function buildFoodInvoice(
     balanceDue: split.balanceDue,
     paymentStatus: split.paymentStatus,
     paymentTiming,
+    paymentMethod: resolveFoodPaymentMethod(row, settled),
     type: "restaurant",
   };
 }
@@ -306,6 +331,7 @@ export function buildOverallInvoice(
     balanceDue: split.balanceDue,
     paymentStatus: split.paymentStatus,
     paymentTiming,
+    paymentMethod: resolveOverallPaymentMethod(row),
     type: "overall",
   };
 }

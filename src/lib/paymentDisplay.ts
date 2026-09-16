@@ -1,4 +1,9 @@
-import type { CheckInRecord, PaymentStatus, PaymentTiming } from "../types/checkIn";
+import type {
+  CheckInRecord,
+  PaymentMethod,
+  PaymentStatus,
+  PaymentTiming,
+} from "../types/checkIn";
 import { formatRs } from "./utils";
 
 export type PaymentBadgeTone = "success" | "warning" | "danger" | "muted" | "info";
@@ -31,6 +36,19 @@ export function paymentStatusTone(status: PaymentStatus | string): PaymentBadgeT
       return "warning";
     default:
       return "muted";
+  }
+}
+
+export function paymentMethodLabel(method: PaymentMethod | string | null | undefined): string {
+  switch (method) {
+    case "cash":
+      return "Cash";
+    case "card":
+      return "Card";
+    case "online":
+      return "Online / bank transfer";
+    default:
+      return "—";
   }
 }
 
@@ -87,4 +105,11 @@ export function paymentBadge(row: Pick<CheckInRecord, "paymentStatus">) {
     tone: paymentStatusTone(row.paymentStatus),
     label: paymentStatusLabel(row.paymentStatus),
   };
+}
+
+/** Discount and GST were not configured on the stay (defer billing to checkout). */
+export function isStayBillingUnset(
+  row: Pick<CheckInRecord, "discountPercent" | "taxPercent">,
+): boolean {
+  return (row.discountPercent || 0) <= 0 && (row.taxPercent || 0) <= 0;
 }

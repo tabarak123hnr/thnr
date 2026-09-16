@@ -5,8 +5,10 @@ import {
   Pencil,
   Play,
   Plus,
+  Search,
   Sparkles,
   Trash2,
+  X,
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -171,6 +173,7 @@ export function DutiesRosterPage() {
   const [rosterDate, setRosterDate] = useState(todayIsoDate);
   const [dailyDate, setDailyDate] = useState(todayIsoDate);
   const [scorePeriod, setScorePeriod] = useState<ScorePeriod>("week");
+  const [search, setSearch] = useState("");
 
   const [dailyOpen, setDailyOpen] = useState(false);
   const [dailySaving, setDailySaving] = useState(false);
@@ -240,6 +243,30 @@ export function DutiesRosterPage() {
     );
   }, [rosterDuties, rosterDate, today, housekeepingTasks]);
 
+  const searchedRoster = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return filtered;
+    return filtered.filter((row) => {
+      const employee = employees.find((e) => e.id === row.assigneeId);
+      const name = (employee?.name || row.assigneeName || "Unassigned").toLowerCase();
+      const desig = (employee?.designation || "").toLowerCase();
+      const title = (row.title || "").toLowerCase();
+      const category = (row.category || "").toLowerCase();
+      const shift = (row.shift || "").toLowerCase();
+      const status = (statusLabel[row.status] || row.status || "").toLowerCase();
+      const sup = (row.checkedInBy || "").toLowerCase();
+      return (
+        name.includes(q) ||
+        desig.includes(q) ||
+        title.includes(q) ||
+        category.includes(q) ||
+        shift.includes(q) ||
+        status.includes(q) ||
+        sup.includes(q)
+      );
+    });
+  }, [filtered, search, employees]);
+
   const dailyDuties = useMemo(
     () =>
       rosterDuties.filter((d) => dutyShowsOnDay(d, dailyDate, today, housekeepingTasks)),
@@ -292,6 +319,28 @@ export function DutiesRosterPage() {
     return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [dailyDuties, employees, housekeepingTasks, dailyDate, today, duties]);
 
+  const searchedDailyGroups = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return dailyGroups;
+    return dailyGroups
+      .map((group) => {
+        const nameMatches = group.name.toLowerCase().includes(q);
+        const desigMatches = (group.employee?.designation || "").toLowerCase().includes(q);
+        if (nameMatches || desigMatches) return group;
+        const matchingRows = group.rows.filter(
+          (r) =>
+            r.title.toLowerCase().includes(q) ||
+            r.category.toLowerCase().includes(q) ||
+            r.shift.toLowerCase().includes(q),
+        );
+        if (matchingRows.length > 0) {
+          return { ...group, rows: matchingRows };
+        }
+        return null;
+      })
+      .filter((g): g is NonNullable<typeof g> => g !== null);
+  }, [dailyGroups, search]);
+
   const scoredDuties = useMemo(
     () => dutiesInPeriod(rosterDuties, scorePeriod, today),
     [rosterDuties, scorePeriod, today],
@@ -300,9 +349,19 @@ export function DutiesRosterPage() {
   const performance = useMemo(() => {
     const active = employees.filter((e) => e.status === "active");
     return active
-      .map((e) => scoreEmployeeDuties(scoredDuties, e, today))
-      .sort((a, b) => b.score - a.score || b.earnedPoints - a.earnedPoints);
+      .map((employee) => scoreEmployeeDuties(scoredDuties, employee, today))
+      .sort((a, b) => b.score - a.score || a.employeeName.localeCompare(b.employeeName));
   }, [employees, scoredDuties, today]);
+
+  const searchedPerformance = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return performance;
+    return performance.filter(
+      (row) =>
+        row.employeeName.toLowerCase().includes(q) ||
+        (row.designation || "").toLowerCase().includes(q),
+    );
+  }, [performance, search]);
 
   const performanceById = useMemo(() => {
     const map = new Map<string, ReturnType<typeof scoreEmployeeDuties>>();
@@ -589,6 +648,29 @@ export function DutiesRosterPage() {
                 onChange={(e) => setDailyDate(e.target.value)}
               />
             </Field>
+            <div className="w-full sm:w-64">
+              <Field label="Search daily tasks">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                  <Input
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search staff, task, shift…"
+                    className="h-10 rounded-xl ps-9 pe-8 text-sm"
+                  />
+                  {search ? (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="absolute end-2.5 top-1/2 -translate-y-1/2 cursor-pointer text-muted hover:text-[var(--text)]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+              </Field>
+            </div>
             <p className="pb-2 text-sm text-muted">
               {dailyDuties.length} task{dailyDuties.length === 1 ? "" : "s"} ·{" "}
               {formatDutyDate(dailyDate)}
@@ -603,14 +685,16 @@ export function DutiesRosterPage() {
               Assign tasks
             </Button>
           </div>
-          {dailyGroups.length === 0 ? (
+          {searchedDailyGroups.length === 0 ? (
             <Card>
               <p className="text-sm text-muted">
-                No tasks for this day. Assign daily tasks to an employee with a supervisor.
+                {search
+                  ? "No staff or daily tasks match your search."
+                  : "No tasks for this day. Assign daily tasks to an employee with a supervisor."}
               </p>
             </Card>
           ) : (
-            dailyGroups.map((group) => {
+            searchedDailyGroups.map((group) => {
               const score = group.employee
                 ? scoreEmployeeDuties(dailyDuties, group.employee, today)
                 : null;
@@ -788,30 +872,59 @@ export function DutiesRosterPage() {
 
       {tab === "performance" ? (
         <div>
-          <div className="mb-4 w-full sm:w-44">
-            <FancySelect
-              value={scorePeriod}
-              onChange={(v) => setScorePeriod(v as ScorePeriod)}
-              options={[
-                { value: "today", label: "Today" },
-                { value: "week", label: "This week" },
-                { value: "all", label: "All time" },
-              ]}
-            />
+          <div className="mb-4 flex flex-wrap items-end gap-3">
+            <div className="w-full sm:w-44">
+              <Field label="Period">
+                <FancySelect
+                  value={scorePeriod}
+                  onChange={(v) => setScorePeriod(v as ScorePeriod)}
+                  options={[
+                    { value: "today", label: "Today" },
+                    { value: "week", label: "This week" },
+                    { value: "all", label: "All time" },
+                  ]}
+                />
+              </Field>
+            </div>
+            <div className="w-full sm:w-64">
+              <Field label="Search staff">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                  <Input
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search employee or role…"
+                    className="h-10 rounded-xl ps-9 pe-8 text-sm"
+                  />
+                  {search ? (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="absolute end-2.5 top-1/2 -translate-y-1/2 cursor-pointer text-muted hover:text-[var(--text)]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+              </Field>
+            </div>
           </div>
           <Card>
             <Table
               headers={["Employee", "Done / assigned", "Earned", "Deducted", "Score"]}
               colWidths={["28%", "18%", "16%", "16%", "22%"]}
             >
-              {performance.length === 0 ? (
+              {searchedPerformance.length === 0 ? (
                 <Tr>
                   <Td className="text-muted" colSpan={5}>
-                    Add employees to track daily task scores.
+                    {search
+                      ? "No employees match your search."
+                      : "Add employees to track daily task scores."}
                   </Td>
                 </Tr>
               ) : (
-                performance.map((row) => (
+                searchedPerformance.map((row) => (
                   <Tr key={row.employeeId}>
                     <Td>
                       <p className="font-semibold">{row.employeeName}</p>
@@ -855,8 +968,31 @@ export function DutiesRosterPage() {
                 onChange={(e) => setRosterDate(e.target.value)}
               />
             </Field>
+            <div className="w-full sm:w-64">
+              <Field label="Search roster">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                  <Input
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search staff, task, shift…"
+                    className="h-10 rounded-xl ps-9 pe-8 text-sm"
+                  />
+                  {search ? (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="absolute end-2.5 top-1/2 -translate-y-1/2 cursor-pointer text-muted hover:text-[var(--text)]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+              </Field>
+            </div>
             <p className="pb-2 text-sm text-muted">
-              {filtered.length} task{filtered.length === 1 ? "" : "s"} ·{" "}
+              {searchedRoster.length} of {filtered.length} task{filtered.length === 1 ? "" : "s"} ·{" "}
               {formatDutyDate(rosterDate)}
             </p>
           </div>
@@ -872,14 +1008,16 @@ export function DutiesRosterPage() {
               ]}
               colWidths={["22%", "18%", "28%", "14%", "18%"]}
             >
-              {filtered.length === 0 ? (
+              {searchedRoster.length === 0 ? (
                 <Tr bordered>
                   <Td bordered className="text-muted" colSpan={5}>
-                    No tasks for this date. Assign daily tasks to staff.
+                    {search
+                      ? "No tasks match your search."
+                      : "No tasks for this date. Assign daily tasks to staff."}
                   </Td>
                 </Tr>
               ) : (
-                filtered.map((row) => {
+                searchedRoster.map((row) => {
                   const fromHousekeeping = isRoomDuty(row);
                   const employee = employees.find((e) => e.id === row.assigneeId);
                   const score = row.assigneeId

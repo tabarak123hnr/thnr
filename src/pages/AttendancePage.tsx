@@ -1,9 +1,9 @@
-import { Clock, LogIn, LogOut } from "lucide-react";
+import { Clock, LogIn, LogOut, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
-import { Field, Input, PageHeader, StatCard } from "../components/ui/Page";
+import { EmptyState, Field, Input, PageHeader, StatCard } from "../components/ui/Page";
 import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
@@ -95,6 +95,8 @@ export function AttendancePage() {
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [logDate, setLogDate] = useState(todayIsoDate);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "clocked_in" | "clocked_out" | "absent">("all");
 
   useEffect(() => {
     const a = subscribeEmployees(setEmployees);
@@ -152,6 +154,33 @@ export function AttendancePage() {
       return { employee, record, open: openOnDate };
     });
   }, [activeEmployees, openByEmployee, records, logDate, today]);
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return dayRows.filter(({ employee, record, open }) => {
+      if (q) {
+        const nameMatch = employee.name.toLowerCase().includes(q);
+        const desigMatch = (employee.designation || "").toLowerCase().includes(q);
+        const shiftMatch = (employee.shift || "").toLowerCase().includes(q);
+        const phoneMatch = (employee.phone || "").toLowerCase().includes(q);
+        if (!nameMatch && !desigMatch && !shiftMatch && !phoneMatch) {
+          return false;
+        }
+      }
+
+      if (statusFilter === "clocked_in") {
+        return Boolean(open);
+      }
+      if (statusFilter === "clocked_out") {
+        return Boolean(record?.clockOutAt);
+      }
+      if (statusFilter === "absent") {
+        return !open && !record;
+      }
+
+      return true;
+    });
+  }, [dayRows, search, statusFilter]);
 
   const stats = useMemo(() => {
     const clockedIn = activeEmployees.filter((e) => openByEmployee.has(e.id)).length;
@@ -281,30 +310,98 @@ export function AttendancePage() {
       </div>
 
       <Card>
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h2 className="text-base font-bold tracking-tight">Staff attendance</h2>
             <p className="text-sm text-muted">
-              {activeEmployees.length} employee{activeEmployees.length === 1 ? "" : "s"} ·{" "}
+              {filteredRows.length} of {activeEmployees.length} employee{activeEmployees.length === 1 ? "" : "s"} ·{" "}
               {formatClockDate(logDate)}
             </p>
           </div>
-          <div className="w-full sm:w-44">
-            <Field label="Date">
-              <Input type="date" value={logDate} onChange={(e) => setLogDate(e.target.value)} />
-            </Field>
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="w-full sm:w-64">
+              <Field label="Search staff">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                  <Input
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search name, role, shift…"
+                    className="h-10 rounded-xl ps-9 pe-8 text-sm"
+                  />
+                  {search ? (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="absolute end-2.5 top-1/2 -translate-y-1/2 cursor-pointer text-muted hover:text-[var(--text)]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+              </Field>
+            </div>
+            <div className="w-full sm:w-44">
+              <Field label="Date">
+                <Input
+                  type="date"
+                  value={logDate}
+                  onChange={(e) => setLogDate(e.target.value)}
+                  className="h-10 rounded-xl text-sm"
+                />
+              </Field>
+            </div>
           </div>
+        </div>
+
+        {/* Quick status filters */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {(
+            [
+              ["all", `All (${dayRows.length})`],
+              ["clocked_in", `Clocked in (${stats.clockedIn})`],
+              ["clocked_out", `Clocked out (${stats.completed})`],
+              ["absent", `No punch yet (${stats.absent})`],
+            ] as const
+          ).map(([val, label]) => (
+            <Button
+              key={val}
+              size="sm"
+              variant={statusFilter === val ? "primary" : "secondary"}
+              onClick={() => setStatusFilter(val)}
+              className="cursor-pointer text-xs font-semibold"
+            >
+              {label}
+            </Button>
+          ))}
+          {search || statusFilter !== "all" ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setSearch("");
+                setStatusFilter("all");
+              }}
+              className="cursor-pointer text-xs text-muted hover:text-[var(--text)]"
+            >
+              Reset filters
+            </Button>
+          ) : null}
         </div>
 
         {activeEmployees.length === 0 ? (
           <p className="text-sm text-muted">Add active employees first, then clock them in here.</p>
+        ) : filteredRows.length === 0 ? (
+          <EmptyState message="No staff members match your search or filter." />
         ) : (
           <Table
             bordered
             headers={["Employee", "Clock in", "Clock out", "Duration", "Status"]}
             colWidths={["26%", "20%", "20%", "14%", "20%"]}
           >
-            {dayRows.map(({ employee, record, open }) => {
+            {filteredRows.map(({ employee, record, open }) => {
               const working = Boolean(open);
               const done = Boolean(record?.clockOutAt);
               const busy = busyId === employee.id;

@@ -8,6 +8,9 @@ export type CheckInStatus = "checked_in" | "checked_out" | "cancelled";
  */
 export type PaymentTiming = "paid_at_checkin" | "due_on_checkout" | "partial";
 
+/** How the guest paid (check-in collection or checkout settlement). */
+export type PaymentMethod = "cash" | "card" | "online";
+
 /** Settled result across the stay */
 export type PaymentStatus = "paid" | "due" | "pending" | "partial";
 
@@ -53,6 +56,10 @@ export interface CheckInRecord {
   amountPaid: number;
   /** Remaining balance (totalBill - amountPaid) */
   balanceDue: number;
+  /** Method used for money collected at check-in (full or partial). */
+  checkInPaymentMethod: PaymentMethod | null;
+  /** Method used when the remaining balance was collected at checkout. */
+  checkoutPaymentMethod: PaymentMethod | null;
   /** Snapshot of room rate at check-in / last update (before discount) */
   nightlyRate: number;
   /** 0–100 off room (after GST) */
@@ -69,6 +76,12 @@ export interface CheckInRecord {
   taxAppliesToRoom: boolean;
   taxAppliesToFood: boolean;
   taxAmount: number;
+  /** GST % applied once on the guest’s total food bill (set when food bill is cleared). */
+  foodTaxPercent: number;
+  foodTaxLabel: string;
+  foodTaxRateId: string | null;
+  foodBillPaymentMethod: PaymentMethod | null;
+  foodBillClearedAt: string | null;
   totalBill: number;
   checkedOutAt?: string | null;
   checkoutMode?: "manual" | "automatic" | null;
