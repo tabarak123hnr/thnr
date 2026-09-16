@@ -129,6 +129,11 @@ export const GuestInvoiceDocument = forwardRef<
             <p style={{ margin: "10px 0 0", fontSize: 12, color: MUTED }}>
               Status: <strong style={{ color: INK }}>{statusLabel}</strong>
             </p>
+            {invoice.paymentMethod ? (
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: MUTED }}>
+                Payment: <strong style={{ color: INK }}>{invoice.paymentMethod}</strong>
+              </p>
+            ) : null}
             <p style={{ margin: "4px 0 0", fontSize: 12, color: MUTED }}>
               Stay:{" "}
               <strong style={{ color: INK }}>
@@ -420,6 +425,12 @@ export const GuestInvoiceDocument = forwardRef<
               Please settle any balance due before or at check-out.
               <br />
               Status: {statusLabel} · {paymentPlanLabel(invoice.paymentTiming)}
+              {invoice.paymentMethod ? (
+                <>
+                  <br />
+                  Method: {invoice.paymentMethod}
+                </>
+              ) : null}
             </p>
           </div>
         </div>

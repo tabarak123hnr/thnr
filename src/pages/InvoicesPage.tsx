@@ -1,12 +1,14 @@
-import { Download, Eye, Printer, RefreshCw } from "lucide-react";
+import { Banknote, CreditCard, Download, Eye, Globe, Printer, RefreshCw, CheckCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GuestInvoiceDocument } from "../components/invoice/GuestInvoiceDocument";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { FancySelect } from "../components/ui/FancySelect";
 import { Modal } from "../components/ui/Modal";
 import { EmptyState, PageHeader, StatCard } from "../components/ui/Page";
 import { Table, Td, Tr } from "../components/ui/Table";
+import { roundMoney } from "../lib/billing";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
 import { downloadCsv, toCsv } from "../lib/exportSpreadsheet";
@@ -17,8 +19,10 @@ import {
   fetchCheckIns,
   subscribeCheckIns,
   type CheckInRecord,
+  type PaymentMethod,
 } from "../services/checkIns";
-import { fetchOrders, subscribeOrders, type FoodOrder } from "../services/orders";
+import { clearGuestFoodBill, fetchOrders, subscribeOrders, type FoodOrder } from "../services/orders";
+import { subscribeTaxRates, type TaxRate } from "../services/taxRates";
 import type { GuestInvoice, InvoiceListStatus, InvoiceType } from "../types/invoice";
 
 const hotelName =
@@ -60,26 +64,44 @@ function typeTone(type: InvoiceType): "gold" | "info" | "purple" {
   return "gold";
 }
 
+function paymentMethodTone(method: string | null | undefined): "success" | "info" | "purple" | "default" {
+  if (!method) return "default";
+  const lower = method.toLowerCase();
+  if (lower.includes("cash")) return "success";
+  if (lower.includes("card")) return "info";
+  if (lower.includes("online")) return "purple";
+  return "default";
+}
+
 export function InvoicesPage() {
   const { t } = useApp();
   const { success: toastSuccess, error: toastError } = useToast();
 
   const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
   const [orders, setOrders] = useState<FoodOrder[]>([]);
+  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [statusFilter, setStatusFilter] = useState<"all" | InvoiceListStatus>("all");
   const [typeFilter, setTypeFilter] = useState<InvoiceType>("overall");
   const [openInvoice, setOpenInvoice] = useState<GuestInvoice | null>(null);
   const [busy, setBusy] = useState<"print" | "pdf" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  /* ── Clear Bill modal state ── */
+  const [clearTarget, setClearTarget] = useState<GuestInvoice | null>(null);
+  const [clearPaymentMethod, setClearPaymentMethod] = useState<PaymentMethod>("cash");
+  const [clearTaxSelect, setClearTaxSelect] = useState("none");
+  const [clearBusy, setClearBusy] = useState(false);
+
   const sheetRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const a = subscribeCheckIns(setCheckIns);
     const b = subscribeOrders(setOrders);
+    const c = subscribeTaxRates(setTaxRates);
     return () => {
       a();
       b();
+      c();
     };
   }, []);
 
@@ -149,6 +171,66 @@ export function InvoicesPage() {
       );
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  /* ── Clear Bill helpers ── */
+  const foodTaxOptions = useMemo(
+    () =>
+      [
+        { value: "none", label: "No GST" },
+        ...taxRates
+          .filter((t) => t.active && t.appliesToFood)
+          .map((t) => ({
+            value: t.id,
+            label: `${t.name} (${t.percent}%)`,
+          })),
+      ],
+    [taxRates],
+  );
+
+  const clearTaxRate = useMemo(() => {
+    if (clearTaxSelect === "none") return null;
+    return taxRates.find((t) => t.id === clearTaxSelect) ?? null;
+  }, [taxRates, clearTaxSelect]);
+
+  const clearPreview = useMemo(() => {
+    if (!clearTarget) return { subtotal: 0, gst: 0, total: 0 };
+    const subtotal = clearTarget.foodTotal;
+    const pct = clearTaxRate?.percent ?? 0;
+    const gst = pct > 0 ? roundMoney((subtotal * pct) / 100) : 0;
+    return { subtotal, gst, total: roundMoney(subtotal + gst) };
+  }, [clearTarget, clearTaxRate]);
+
+  function openClearBill(inv: GuestInvoice) {
+    setClearTarget(inv);
+    setClearPaymentMethod("cash");
+    setClearTaxSelect("none");
+    setClearBusy(false);
+  }
+
+  async function onConfirmClearBill() {
+    if (!clearTarget) return;
+    setClearBusy(true);
+    try {
+      const result = await clearGuestFoodBill(clearTarget.checkInId, {
+        taxPercent: clearTaxRate?.percent ?? 0,
+        taxLabel: clearTaxRate?.name,
+        taxRateId: clearTaxRate?.id ?? null,
+        paymentMethod: clearPaymentMethod,
+      });
+      toastSuccess(
+        "Food bill cleared",
+        `${result.guestName} · Room ${result.roomNumber} — ${formatRs(result.folioTotal, t.common.rs)} settled`,
+      );
+      setClearTarget(null);
+    } catch (err) {
+      toastError(
+        "Clear bill failed",
+        err instanceof Error ? err.message : "Could not settle this food bill.",
+      );
+    } finally {
+      setClearBusy(false);
     }
   }
 
@@ -309,9 +391,11 @@ export function InvoicesPage() {
               t.common.date,
               t.common.amount,
               t.common.paid,
+              "Payment",
               t.status,
               t.common.actions,
             ]}
+            colWidths={["15%", "13%", "7%", "10%", "10%", "10%", "9%", "9%", "17%"]}
           >
             {filtered.map((inv) => {
               const status = invoiceListStatus(inv);
@@ -338,17 +422,38 @@ export function InvoicesPage() {
                   </Td>
                   <Td>{formatRs(inv.amountPaid, t.common.rs)}</Td>
                   <Td>
-                    <Badge tone={statusTone[status]}>{statusLabel[status]}</Badge>
+                    {inv.paymentMethod ? (
+                      <Badge tone={paymentMethodTone(inv.paymentMethod)} className="capitalize">
+                        {inv.paymentMethod}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs text-muted">—</span>
+                    )}
                   </Td>
                   <Td>
-                    <Button
-                      size="sm"
-                      className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
-                      icon={<Eye className="h-3.5 w-3.5" />}
-                      onClick={() => setOpenInvoice(inv)}
-                    >
-                      Open
-                    </Button>
+                    <Badge tone={statusTone[status]}>{statusLabel[status]}</Badge>
+                  </Td>
+                  <Td className="whitespace-nowrap">
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
+                      <Button
+                        size="sm"
+                        className="cursor-pointer whitespace-nowrap !bg-sky-600 !text-white hover:!bg-sky-500 shadow-xs"
+                        icon={<Eye className="h-3.5 w-3.5" />}
+                        onClick={() => setOpenInvoice(inv)}
+                      >
+                        Open
+                      </Button>
+                      {inv.type === "restaurant" && status !== "paid" ? (
+                        <Button
+                          size="sm"
+                          className="cursor-pointer whitespace-nowrap !bg-emerald-600 !text-white hover:!bg-emerald-500 shadow-xs"
+                          icon={<CheckCircle className="h-3.5 w-3.5" />}
+                          onClick={() => openClearBill(inv)}
+                        >
+                          Clear Bill
+                        </Button>
+                      ) : null}
+                    </div>
                   </Td>
                 </Tr>
               );
@@ -402,6 +507,107 @@ export function InvoicesPage() {
               hotelName={hotelName}
               rs={t.common.rs}
             />
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* ── Clear Food Bill Modal ── */}
+      <Modal
+        open={Boolean(clearTarget)}
+        onClose={() => !clearBusy && setClearTarget(null)}
+        title="Clear Food Bill"
+        subtitle={
+          clearTarget
+            ? `${clearTarget.guestName} · Room ${clearTarget.roomNumber}`
+            : undefined
+        }
+        wide
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              disabled={clearBusy}
+              onClick={() => setClearTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="cursor-pointer whitespace-nowrap !bg-emerald-600 !text-white hover:!bg-emerald-500 shadow-xs font-semibold"
+              icon={<CheckCircle className="h-4 w-4" />}
+              disabled={clearBusy}
+              onClick={() => void onConfirmClearBill()}
+            >
+              {clearBusy ? "Clearing…" : "Confirm & Clear"}
+            </Button>
+          </>
+        }
+      >
+        {clearTarget ? (
+          <div className="space-y-5">
+            {/* Payment method */}
+            <div>
+              <label className="mb-2 block text-sm font-semibold">Payment Method</label>
+              <div className="flex gap-2">
+                {(
+                  [
+                    ["cash", "Cash", <Banknote key="b" className="h-4 w-4" />],
+                    ["card", "Card", <CreditCard key="c" className="h-4 w-4" />],
+                    ["online", "Online", <Globe key="o" className="h-4 w-4" />],
+                  ] as const
+                ).map(([method, label, icon]) => (
+                  <Button
+                    key={method}
+                    size="sm"
+                    variant={clearPaymentMethod === method ? "gold" : "secondary"}
+                    className="cursor-pointer flex-1"
+                    icon={icon}
+                    onClick={() => setClearPaymentMethod(method)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* GST selection */}
+            <div>
+              <label className="mb-2 block text-sm font-semibold">GST / Tax Rate</label>
+              <FancySelect
+                value={clearTaxSelect}
+                onChange={setClearTaxSelect}
+                options={foodTaxOptions}
+                placeholder="Select tax rate…"
+              />
+            </div>
+
+            {/* Preview */}
+            <div className="rounded-xl border border-app bg-elevated p-4">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted">
+                Bill Preview
+              </p>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted">Food subtotal</span>
+                  <span className="font-semibold">
+                    {formatRs(clearPreview.subtotal, t.common.rs)}
+                  </span>
+                </div>
+                {clearPreview.gst > 0 ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted">
+                      {clearTaxRate?.name || "GST"} ({clearTaxRate?.percent ?? 0}%)
+                    </span>
+                    <span className="font-semibold">
+                      {formatRs(clearPreview.gst, t.common.rs)}
+                    </span>
+                  </div>
+                ) : null}
+                <div className="mt-2 flex justify-between border-t border-app pt-2 text-base font-extrabold">
+                  <span>Total to collect</span>
+                  <span>{formatRs(clearPreview.total, t.common.rs)}</span>
+                </div>
+              </div>
+            </div>
           </div>
         ) : null}
       </Modal>

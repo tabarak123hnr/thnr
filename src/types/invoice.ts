@@ -58,6 +58,8 @@ export interface GuestInvoice {
   notes: string;
   adults: number;
   children: number;
+  /** Method used for payment (e.g. Cash, Card, Online) */
+  paymentMethod: string | null;
 }
 
 export function invoiceListStatus(inv: GuestInvoice): InvoiceListStatus {

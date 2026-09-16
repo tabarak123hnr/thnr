@@ -24,7 +24,8 @@ import {
   type FoodOrderPaymentStatus,
   type FoodOrderStatus,
 } from "../types/order";
-import { adjustCheckInExtraCharges, applyStayFoodTax } from "./checkIns";
+import { adjustCheckInExtraCharges } from "./checkIns";
+import type { PaymentMethod } from "../types/checkIn";
 
 export type { FoodOrder, FoodOrderItem, FoodOrderPaymentStatus, FoodOrderStatus };
 export { calcOrderAmount, orderTaxAmount, orderTicketTotal };
@@ -144,10 +145,6 @@ export async function createFoodOrder(input: {
   notes?: string;
   /** Default due — add to guest bill. Paid = cash collected now. */
   paymentStatus?: FoodOrderPaymentStatus;
-  /** Optional GST for this food ticket (synced onto the stay for food). */
-  taxPercent?: number;
-  taxLabel?: string;
-  taxRateId?: string | null;
 }) {
   if (!auth.currentUser) {
     throw new Error("You must be signed in to place an order.");
@@ -167,20 +164,9 @@ export async function createFoodOrder(input: {
   }
 
   const amount = calcOrderAmount(items);
-  const taxPercent = Math.max(0, Math.min(100, Number(input.taxPercent) || 0));
-  const taxAmount = taxPercent > 0 ? roundMoney((amount * taxPercent) / 100) : 0;
-  const ticketTotal = roundMoney(amount + taxAmount);
   const token = nextToken();
   const paymentStatus: FoodOrderPaymentStatus =
     input.paymentStatus === "paid" ? "paid" : "due";
-
-  if (taxPercent > 0) {
-    await applyStayFoodTax(input.checkInId, {
-      taxPercent,
-      taxLabel: input.taxLabel,
-      taxRateId: input.taxRateId,
-    });
-  }
 
   const ref = await addDoc(collection(db, "orders"), {
     token,
@@ -190,8 +176,8 @@ export async function createFoodOrder(input: {
     guestName: input.guestName.trim(),
     items,
     amount,
-    taxPercent,
-    taxAmount,
+    taxPercent: 0,
+    taxAmount: 0,
     status: "pending" as FoodOrderStatus,
     paymentStatus,
     notes: (input.notes ?? "").trim(),
@@ -202,7 +188,7 @@ export async function createFoodOrder(input: {
   });
 
   await adjustCheckInExtraCharges(input.checkInId, amount, {
-    paidDelta: paymentStatus === "paid" ? ticketTotal : 0,
+    paidDelta: paymentStatus === "paid" ? amount : 0,
   });
   await bumpRoomOpenOrders(input.roomId, 1);
 
@@ -273,14 +259,12 @@ export async function markOrderPayment(
 
   if (!prev.checkInId || !prev.amount) return;
 
-  const ticket = orderTicketTotal(prev);
-  // due → paid: guest paid this ticket now (food + GST)
-  // paid → due: reverse the cash against the stay
+  const pretax = Math.max(0, Number(prev.amount) || 0);
   const paidDelta =
     paymentStatus === "paid" && prev.paymentStatus === "due"
-      ? ticket
+      ? pretax
       : paymentStatus === "due" && prev.paymentStatus === "paid"
-        ? -ticket
+        ? -pretax
         : 0;
 
   if (paidDelta) {
@@ -335,6 +319,95 @@ export async function markOrderDelivered(id: string) {
   await bumpRoomOpenOrders(prev.roomId, -1);
 }
 
+/**
+ * Settle the guest’s full food folio: one GST rate on total food, then mark tickets paid.
+ */
+export async function clearGuestFoodBill(
+  checkInId: string,
+  input: {
+    taxPercent: number;
+    taxLabel?: string;
+    taxRateId?: string | null;
+    paymentMethod: PaymentMethod;
+  },
+) {
+  if (!auth.currentUser) throw new Error("You must be signed in.");
+  if (!checkInId) throw new Error("Missing stay.");
+
+  const stayRef = doc(db, "checkIns", checkInId);
+  const staySnap = await getDoc(stayRef);
+  if (!staySnap.exists()) throw new Error("Check-in not found.");
+  const stay = staySnap.data();
+  if (stay.status === "cancelled") {
+    throw new Error("This stay was cancelled.");
+  }
+
+  const q = query(collection(db, "orders"), where("checkInId", "==", checkInId));
+  const orderSnap = await getDocs(q);
+  if (orderSnap.empty) throw new Error("No food orders on this stay.");
+
+  const orders = orderSnap.docs.map((d) =>
+    mapOrder(d.id, d.data() as Record<string, unknown>),
+  );
+  const foodSubtotal = roundMoney(orders.reduce((s, o) => s + (o.amount || 0), 0));
+  if (foodSubtotal <= 0) throw new Error("Food total is zero.");
+
+  const pct = Math.max(0, Math.min(100, Number(input.taxPercent) || 0));
+  const foodTax = pct > 0 ? roundMoney((foodSubtotal * pct) / 100) : 0;
+  const folioTotal = roundMoney(foodSubtotal + foodTax);
+
+  const paidPretax = roundMoney(
+    orders
+      .filter((o) => o.paymentStatus === "paid")
+      .reduce((s, o) => s + (o.amount || 0), 0),
+  );
+  const balanceToCollect = roundMoney(folioTotal - paidPretax);
+  if (balanceToCollect < 0) {
+    throw new Error("Food bill is already over-paid for this stay.");
+  }
+
+  const clearedAt = new Date().toISOString();
+  const taxLabel =
+    (input.taxLabel ?? "").trim() || (pct > 0 ? `GST ${pct}%` : "");
+
+  await Promise.all(
+    orderSnap.docs.map(async (d) => {
+      const data = d.data() as Record<string, unknown>;
+      const patch: Record<string, unknown> = {
+        taxPercent: 0,
+        taxAmount: 0,
+        updatedAt: serverTimestamp(),
+      };
+      if (String(data.paymentStatus ?? "due") !== "paid") {
+        patch.paymentStatus = "paid" satisfies FoodOrderPaymentStatus;
+      }
+      await updateDoc(doc(db, "orders", d.id), patch);
+    }),
+  );
+
+  await updateDoc(stayRef, {
+    foodTaxPercent: pct,
+    foodTaxLabel: taxLabel,
+    foodTaxRateId: input.taxRateId ?? null,
+    foodBillPaymentMethod: input.paymentMethod,
+    foodBillClearedAt: clearedAt,
+    updatedAt: serverTimestamp(),
+  });
+
+  if (balanceToCollect > 0) {
+    await adjustCheckInExtraCharges(checkInId, 0, { paidDelta: balanceToCollect });
+  }
+
+  return {
+    foodSubtotal,
+    foodTax,
+    folioTotal,
+    collected: balanceToCollect,
+    guestName: String(stay.guestName ?? ""),
+    roomNumber: String(stay.roomNumber ?? ""),
+  };
+}
+
 export async function deleteFoodOrder(id: string) {
   if (!auth.currentUser) {
     throw new Error("You must be signed in to delete an order.");
@@ -350,7 +423,7 @@ export async function deleteFoodOrder(id: string) {
 
   if (prev.checkInId && prev.amount) {
     await adjustCheckInExtraCharges(prev.checkInId, -prev.amount, {
-      paidDelta: prev.paymentStatus === "paid" ? -orderTicketTotal(prev) : 0,
+      paidDelta: prev.paymentStatus === "paid" ? -Math.max(0, prev.amount) : 0,
     });
   }
   if (prev.status === "pending") {

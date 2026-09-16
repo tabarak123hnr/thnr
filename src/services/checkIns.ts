@@ -18,6 +18,7 @@ import type {
   CheckInCompanion,
   CheckInRecord,
   CheckInStatus,
+  PaymentMethod,
   PaymentStatus,
   PaymentTiming,
 } from "../types/checkIn";
@@ -27,12 +28,18 @@ export type {
   CheckInCompanion,
   CheckInRecord,
   CheckInStatus,
+  PaymentMethod,
   PaymentStatus,
   PaymentTiming,
 };
 export { resolvePaymentSplit };
 
 const checkoutLocks = new Set<string>();
+
+function parsePaymentMethod(value: unknown): PaymentMethod | null {
+  if (value === "cash" || value === "card" || value === "online") return value;
+  return null;
+}
 
 function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
   const companions = Array.isArray(data.companions)
@@ -121,6 +128,8 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
     balanceDue: Number.isFinite(Number(data.balanceDue))
       ? Math.max(0, Number(data.balanceDue))
       : split.balanceDue,
+    checkInPaymentMethod: parsePaymentMethod(data.checkInPaymentMethod),
+    checkoutPaymentMethod: parsePaymentMethod(data.checkoutPaymentMethod),
     nightlyRate: computed?.nightlyRate ?? nightlyRate,
     discountPercent: Number(data.discountPercent ?? computed?.discountPercent ?? discountPercent),
     discountAmount: Number(data.discountAmount ?? computed?.discountAmount ?? 0),
@@ -137,6 +146,11 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
     taxAppliesToRoom: data.taxAppliesToRoom !== false,
     taxAppliesToFood: data.taxAppliesToFood !== false,
     taxAmount: Number(data.taxAmount ?? computed?.taxAmount ?? 0),
+    foodTaxPercent: Number(data.foodTaxPercent ?? 0) || 0,
+    foodTaxLabel: String(data.foodTaxLabel ?? ""),
+    foodTaxRateId: data.foodTaxRateId ? String(data.foodTaxRateId) : null,
+    foodBillPaymentMethod: parsePaymentMethod(data.foodBillPaymentMethod),
+    foodBillClearedAt: data.foodBillClearedAt ? String(data.foodBillClearedAt) : null,
     totalBill,
     checkedOutAt: data.checkedOutAt ? String(data.checkedOutAt) : null,
     checkoutMode: (data.checkoutMode as CheckInRecord["checkoutMode"]) ?? null,
@@ -222,6 +236,7 @@ export async function createCheckIn(input: {
   taxPercent?: number;
   taxAppliesToRoom?: boolean;
   taxAppliesToFood?: boolean;
+  checkInPaymentMethod?: PaymentMethod | null;
 }) {
   if (!auth.currentUser) {
     throw new Error("You must be signed in to check in a guest.");
@@ -301,6 +316,14 @@ export async function createCheckIn(input: {
     taxAppliesToFood: bill.taxAppliesToFood,
     taxAmount: bill.taxAmount,
     totalBill: bill.totalBill,
+    checkInPaymentMethod:
+      split.amountPaid > 0 ? (input.checkInPaymentMethod ?? null) : null,
+    checkoutPaymentMethod: null,
+    foodTaxPercent: 0,
+    foodTaxLabel: "",
+    foodTaxRateId: null,
+    foodBillPaymentMethod: null,
+    foodBillClearedAt: null,
     checkedOutAt: null,
     checkoutMode: null,
     createdAt: serverTimestamp(),
@@ -371,6 +394,7 @@ export async function updateCheckIn(
     taxPercent?: number;
     taxAppliesToRoom?: boolean;
     taxAppliesToFood?: boolean;
+    checkInPaymentMethod?: PaymentMethod | null;
   },
 ) {
   if (!auth.currentUser) {
@@ -480,6 +504,12 @@ export async function updateCheckIn(
     patch.paymentStatus = split.paymentStatus;
     patch.amountPaid = split.amountPaid;
     patch.balanceDue = split.balanceDue;
+    if (input.checkInPaymentMethod !== undefined) {
+      patch.checkInPaymentMethod =
+        split.amountPaid > 0 ? input.checkInPaymentMethod : null;
+    } else if (split.amountPaid <= 0) {
+      patch.checkInPaymentMethod = null;
+    }
   }
 
   await updateDoc(doc(db, "checkIns", id), patch);
@@ -554,6 +584,16 @@ export async function checkoutGuest(
     paymentReceived?: boolean;
     /** Staff name who performed check-out */
     checkedOutBy?: string;
+    /** Apply discount / GST before final bill (checkout when not set at check-in). */
+    billing?: {
+      discountPercent?: number;
+      taxRateId?: string | null;
+      taxLabel?: string;
+      taxPercent?: number;
+      taxAppliesToRoom?: boolean;
+      taxAppliesToFood?: boolean;
+    };
+    checkoutPaymentMethod?: PaymentMethod | null;
   },
 ) {
   if (!auth.currentUser) {
@@ -583,14 +623,26 @@ export async function checkoutGuest(
     const paymentTiming =
       (data.paymentTiming as PaymentTiming) || "due_on_checkout";
     const priorPaid = Math.max(0, Number(data.amountPaid ?? 0));
+    const billingOverride = options?.billing;
+    const discountForBill =
+      billingOverride?.discountPercent != null
+        ? clampDiscountPercent(billingOverride.discountPercent)
+        : clampDiscountPercent(data.discountPercent);
+    const taxForBill = billingOverride
+      ? {
+          taxPercent: billingOverride.taxPercent ?? 0,
+          taxAppliesToRoom: billingOverride.taxAppliesToRoom !== false,
+          taxAppliesToFood: billingOverride.taxAppliesToFood !== false,
+        }
+      : taxOptionsFromStay(data);
     const bill = calcCheckoutBill(
       Number(data.nightlyRate ?? 0),
       checkInAt,
       plannedOut,
       actualOut,
       Number(data.extraCharges ?? 0),
-      clampDiscountPercent(data.discountPercent),
-      taxOptionsFromStay(data),
+      discountForBill,
+      taxForBill,
     );
 
     // Keep cash already collected; clamp if early leave lowered the bill
@@ -624,6 +676,11 @@ export async function checkoutGuest(
         ? (options?.checkedOutBy ?? "").trim() || "System"
         : (options?.checkedOutBy ?? "").trim();
 
+    const checkoutMethod =
+      balanceBeforeCollect > 0 && paymentReceived
+        ? (options?.checkoutPaymentMethod ?? null)
+        : parsePaymentMethod(data.checkoutPaymentMethod);
+
     await updateDoc(ref, {
       status: "checked_out",
       checkOutAt: actualOut,
@@ -631,6 +688,16 @@ export async function checkoutGuest(
       checkedOutAt: actualOut,
       checkoutMode: mode,
       checkedOutBy,
+      ...(billingOverride
+        ? {
+            taxRateId:
+              billingOverride.taxRateId !== undefined
+                ? billingOverride.taxRateId
+                : (data.taxRateId ?? null),
+            taxLabel: (billingOverride.taxLabel ?? data.taxLabel ?? "").toString().trim(),
+          }
+        : {}),
+      checkoutPaymentMethod: checkoutMethod,
       paymentTiming:
         balanceDue <= 0
           ? amountPaidBeforeCheckout > 0 && amountPaidBeforeCheckout < bill.totalBill
@@ -894,7 +961,7 @@ export async function adjustCheckInExtraCharges(
     checkOutAt,
     nextExtra,
     clampDiscountPercent(data.discountPercent),
-    taxOptionsFromStay(data),
+    { ...taxOptionsFromStay(data), taxAppliesToFood: false },
   );
 
   const amountPaid = Math.max(0, Number(data.amountPaid ?? 0) + paidDelta);

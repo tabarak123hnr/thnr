@@ -8,6 +8,7 @@ export function Table({
   scrollX = true,
   /** Word-style grid with borders on every row and column */
   bordered = false,
+  className,
 }: {
   headers: string[];
   children: ReactNode;
@@ -16,6 +17,7 @@ export function Table({
   /** When false, the table fills its container and never shows a horizontal scrollbar. */
   scrollX?: boolean;
   bordered?: boolean;
+  className?: string;
 }) {
   return (
     <div
@@ -29,8 +31,9 @@ export function Table({
       <table
         className={cn(
           "w-full table-fixed border-collapse text-sm",
-          scrollX && "min-w-[520px] sm:min-w-[600px] lg:min-w-[680px]",
+          scrollX && "min-w-[600px] sm:min-w-[700px] lg:min-w-[820px]",
           bordered && "border border-app",
+          className,
         )}
       >
         {colWidths?.length ? (
