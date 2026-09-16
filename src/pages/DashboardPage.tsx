@@ -1,4 +1,4 @@
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, Eye } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "../components/ui/Badge";
@@ -291,6 +291,17 @@ export function DashboardPage() {
         subtitle={t.todaySub}
         actions={
           <>
+            <a
+              href="https://hoteleye.punjab.gov.pk/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3.5 py-2 text-sm font-semibold text-sky-900 shadow-xs transition-all hover:border-sky-300 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/50"
+              title="Open Hotel Eye - Punjab Police Portal"
+            >
+              <Eye className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+              <span>Hotel Eye</span>
+              <ArrowUpRight className="h-3.5 w-3.5 opacity-60" />
+            </a>
             <Link to="/check-in" className="w-full md:hidden sm:w-auto">
               <Button className="w-full sm:w-auto">{t.newCheckIn}</Button>
             </Link>
