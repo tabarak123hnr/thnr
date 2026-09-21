@@ -1,6 +1,17 @@
-import { Check, Clock3, Eye, Trash2, UtensilsCrossed } from "lucide-react";
+import {
+  Banknote,
+  Check,
+  CheckCircle,
+  Clock3,
+  CreditCard,
+  Eye,
+  Globe,
+  Trash2,
+  UtensilsCrossed,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
+import { FancySelect } from "../components/ui/FancySelect";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -8,14 +19,17 @@ import { Modal } from "../components/ui/Modal";
 import { EmptyState, PageHeader, StatCard } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
+import { roundMoney } from "../lib/billing";
 import { cn, formatRs } from "../lib/utils";
 import {
   deleteFoodOrder,
   markOrderDelivered,
   markOrderPayment,
+  clearGuestFoodBill,
   subscribeOrders,
   type FoodOrder,
 } from "../services/orders";
+import { subscribeTaxRates, type TaxRate } from "../services/taxRates";
 import { orderTaxAmount, orderTicketTotal } from "../types/order";
 
 function createdAtMs(value: unknown): number {
@@ -67,13 +81,23 @@ export function OrdersPage() {
   const { success: toastSuccess, error: toastError } = useToast();
 
   const [orders, setOrders] = useState<FoodOrder[]>([]);
+  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [viewRow, setViewRow] = useState<FoodOrder | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
   const [deleteRow, setDeleteRow] = useState<FoodOrder | null>(null);
+  const [clearTarget, setClearTarget] = useState<FoodOrder | null>(null);
+  const [clearPaymentMethod, setClearPaymentMethod] = useState<"cash" | "card" | "online">("cash");
+  const [clearTaxSelect, setClearTaxSelect] = useState("none");
+  const [clearBusy, setClearBusy] = useState(false);
 
   useEffect(() => {
-    return subscribeOrders(setOrders);
+    const a = subscribeOrders(setOrders);
+    const b = subscribeTaxRates(setTaxRates);
+    return () => {
+      a();
+      b();
+    };
   }, []);
 
   useEffect(() => {
@@ -94,6 +118,68 @@ export function OrdersPage() {
     .reduce((s, o) => s + orderTicketTotal(o), 0);
   const urgentCount = active.filter((o) => waitMinutes(o.createdAt) >= 12).length;
   const roomsWaiting = new Set(active.map((o) => o.roomNumber)).size;
+
+  const foodTaxOptions = useMemo(
+    () => [
+      { value: "none", label: "No GST" },
+      ...taxRates
+        .filter((t) => t.active && t.appliesToFood)
+        .map((t) => ({
+          value: t.id,
+          label: `${t.name} (${t.percent}%)`,
+        })),
+    ],
+    [taxRates],
+  );
+
+  const clearTaxRate = useMemo(() => {
+    if (clearTaxSelect === "none") return null;
+    return taxRates.find((t) => t.id === clearTaxSelect) ?? null;
+  }, [taxRates, clearTaxSelect]);
+
+  const clearStayOrders = useMemo(
+    () => (clearTarget ? orders.filter((o) => o.checkInId === clearTarget.checkInId) : []),
+    [orders, clearTarget?.checkInId],
+  );
+
+  const clearPreview = useMemo(() => {
+    const subtotal = clearStayOrders.reduce((sum, order) => sum + (order.amount || 0), 0);
+    const pct = clearTaxRate?.percent ?? 0;
+    const gst = pct > 0 ? roundMoney((subtotal * pct) / 100) : 0;
+    return { subtotal, gst, total: roundMoney(subtotal + gst) };
+  }, [clearStayOrders, clearTaxRate]);
+
+  function openClearBill(row: FoodOrder) {
+    setClearTarget(row);
+    setClearPaymentMethod("cash");
+    setClearTaxSelect("none");
+    setClearBusy(false);
+  }
+
+  async function onConfirmClearBill() {
+    if (!clearTarget) return;
+    setClearBusy(true);
+    try {
+      const result = await clearGuestFoodBill(clearTarget.checkInId, {
+        taxPercent: clearTaxRate?.percent ?? 0,
+        taxLabel: clearTaxRate?.name,
+        taxRateId: clearTaxRate?.id ?? null,
+        paymentMethod: clearPaymentMethod,
+      });
+      toastSuccess(
+        "Food bill cleared",
+        `${result.guestName} · Room ${result.roomNumber} — ${formatRs(result.folioTotal, t.common.rs)} settled`,
+      );
+      setClearTarget(null);
+    } catch (err) {
+      toastError(
+        "Clear bill failed",
+        err instanceof Error ? err.message : "Could not settle this food bill.",
+      );
+    } finally {
+      setClearBusy(false);
+    }
+  }
 
   async function onDeliver(row: FoodOrder) {
     setActingId(row.id);
@@ -293,6 +379,14 @@ export function OrdersPage() {
                       Mark paid
                     </Button>
                   ) : null}
+                    <Button
+                      size="sm"
+                      className="cursor-pointer !bg-emerald-600 !text-white hover:!bg-emerald-500"
+                      icon={<CheckCircle className="h-3.5 w-3.5" />}
+                      onClick={() => openClearBill(row)}
+                    >
+                      Clear Bill
+                    </Button>
                   <Button
                     size="sm"
                     className="cursor-pointer !bg-sky-600 !text-white hover:!bg-sky-500"
@@ -328,6 +422,17 @@ export function OrdersPage() {
           <>
             <Button variant="secondary" onClick={() => setViewRow(null)}>
               Close
+            </Button>
+            <Button
+              className="cursor-pointer !bg-emerald-600 !text-white hover:!bg-emerald-500"
+              icon={<CheckCircle className="h-4 w-4" />}
+              onClick={() => {
+                if (!viewRow) return;
+                setViewRow(null);
+                openClearBill(viewRow);
+              }}
+            >
+              Clear Bill
             </Button>
             {viewRow?.paymentStatus === "due" ? (
               <Button
@@ -393,6 +498,90 @@ export function OrdersPage() {
                 ? "Already paid at counter — still listed on the stay for the folio."
                 : "Not paid yet — amount is on the guest stay balance until checkout or Mark paid."}
             </p>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={Boolean(clearTarget)}
+        onClose={() => !clearBusy && setClearTarget(null)}
+        title="Clear Food Bill"
+        subtitle={clearTarget ? `${clearTarget.guestName} · Room ${clearTarget.roomNumber}` : undefined}
+        wide
+        footer={
+          <>
+            <Button variant="secondary" disabled={clearBusy} onClick={() => setClearTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              className="cursor-pointer whitespace-nowrap !bg-emerald-600 !text-white hover:!bg-emerald-500 shadow-xs font-semibold"
+              icon={<CheckCircle className="h-4 w-4" />}
+              disabled={clearBusy}
+              onClick={() => void onConfirmClearBill()}
+            >
+              {clearBusy ? "Clearing…" : "Confirm & Clear"}
+            </Button>
+          </>
+        }
+      >
+        {clearTarget ? (
+          <div className="space-y-5">
+            <div>
+              <label className="mb-2 block text-sm font-semibold">Payment Method</label>
+              <div className="flex gap-2">
+                {([
+                  ["cash", "Cash", <Banknote key="b" className="h-4 w-4" />],
+                  ["card", "Card", <CreditCard key="c" className="h-4 w-4" />],
+                  ["online", "Online", <Globe key="o" className="h-4 w-4" />],
+                ] as const).map(([method, label, icon]) => (
+                  <Button
+                    key={method}
+                    size="sm"
+                    variant={clearPaymentMethod === method ? "gold" : "secondary"}
+                    className="cursor-pointer flex-1"
+                    icon={icon}
+                    onClick={() => setClearPaymentMethod(method)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold">GST / Tax Rate</label>
+              <FancySelect
+                value={clearTaxSelect}
+                onChange={setClearTaxSelect}
+                options={foodTaxOptions}
+                placeholder="Select tax rate…"
+              />
+              <p className="mt-2 text-xs text-muted">
+                Choose No GST to keep the food bill tax-free, or pick a GST rate to add tax before clearing it.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-app bg-elevated p-4">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted">Bill Preview</p>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted">Food subtotal</span>
+                  <span className="font-semibold">{formatRs(clearPreview.subtotal, t.common.rs)}</span>
+                </div>
+                {clearPreview.gst > 0 ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted">
+                      {clearTaxRate?.name || "GST"} ({clearTaxRate?.percent ?? 0}%)
+                    </span>
+                    <span className="font-semibold">{formatRs(clearPreview.gst, t.common.rs)}</span>
+                  </div>
+                ) : null}
+                <div className="mt-2 flex justify-between border-t border-app pt-2 text-base font-extrabold">
+                  <span>Total to collect</span>
+                  <span>{formatRs(clearPreview.total, t.common.rs)}</span>
+                </div>
+              </div>
+            </div>
           </div>
         ) : null}
       </Modal>
