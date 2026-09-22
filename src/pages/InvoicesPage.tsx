@@ -110,6 +110,11 @@ export function InvoicesPage() {
     [checkIns, orders],
   );
 
+  const checkInById = useMemo(
+    () => new Map(checkIns.map((row) => [row.id, row])),
+    [checkIns],
+  );
+
   const overallInvoices = useMemo(
     () => buildOverallInvoices(checkIns, orders),
     [checkIns, orders],
@@ -399,6 +404,8 @@ export function InvoicesPage() {
           >
             {filtered.map((inv) => {
               const status = invoiceListStatus(inv);
+              const stay = checkInById.get(inv.checkInId);
+              const canClearFoodBill = inv.type === "restaurant" && !stay?.foodBillClearedAt;
               return (
                 <Tr key={inv.id}>
                   <Td className="font-bold font-mono text-xs sm:text-sm">
@@ -443,7 +450,7 @@ export function InvoicesPage() {
                       >
                         Open
                       </Button>
-                      {inv.type === "restaurant" && status !== "paid" ? (
+                      {canClearFoodBill ? (
                         <Button
                           size="sm"
                           className="cursor-pointer whitespace-nowrap !bg-emerald-600 !text-white hover:!bg-emerald-500 shadow-xs"
@@ -578,6 +585,9 @@ export function InvoicesPage() {
                 options={foodTaxOptions}
                 placeholder="Select tax rate…"
               />
+              <p className="mt-2 text-xs text-muted">
+                Choose No GST to keep the food bill tax-free, or pick a GST rate to add tax before clearing it.
+              </p>
             </div>
 
             {/* Preview */}
