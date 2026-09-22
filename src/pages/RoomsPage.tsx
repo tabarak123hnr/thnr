@@ -149,7 +149,6 @@ export function RoomsPage() {
   const [checkedOutBy, setCheckedOutBy] = useState("");
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
-  const [checkoutPaymentPaid, setCheckoutPaymentPaid] = useState(true);
 
   useEffect(() => {
     const unsubRooms = subscribeRooms((next) => {
@@ -254,9 +253,6 @@ export function RoomsPage() {
     setCheckoutPassword("");
     setCheckedOutBy(staffDisplayName);
     setCheckoutError(null);
-    setCheckoutPaymentPaid(
-      resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid",
-    );
     setCheckoutOpen(true);
   }
 
@@ -280,16 +276,6 @@ export function RoomsPage() {
       (checkoutPreview?.totalBill ?? activeCheckIn.totalBill) -
         resolveAmountPaid(activeCheckIn),
     );
-    const billSettled =
-      balanceNow <= 0 ||
-      activeCheckIn.paymentStatus === "paid" ||
-      checkoutPaymentPaid;
-    if (!billSettled) {
-      setCheckoutError(
-        `Cannot check out — ${formatRs(balanceNow, t.common.rs)} still due. Confirm “Remaining balance paid” after collecting payment.`,
-      );
-      return;
-    }
     setCheckoutBusy(true);
     setCheckoutError(null);
     try {
@@ -839,14 +825,6 @@ export function RoomsPage() {
                 checkoutBusy ||
                 !checkoutPassword ||
                 !checkedOutBy.trim() ||
-                (activeCheckIn != null &&
-                  (checkoutPreview
-                    ? Math.max(
-                        0,
-                        checkoutPreview.totalBill - resolveAmountPaid(activeCheckIn),
-                      )
-                    : resolveBalanceDue(activeCheckIn)) > 0 &&
-                  !checkoutPaymentPaid)
               }
             >
               {checkoutBusy ? "Checking out…" : "Check out"}
@@ -915,32 +893,6 @@ export function RoomsPage() {
                   placeholder="Staff name"
                 />
               </Field>
-              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-app bg-app px-4 py-3">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4 accent-[var(--accent)]"
-                  checked={
-                    resolveBalanceDue(activeCheckIn) <= 0 ||
-                    activeCheckIn.paymentStatus === "paid" ||
-                    checkoutPaymentPaid
-                  }
-                  disabled={
-                    resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
-                  }
-                  onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
-                />
-                <span className="min-w-0 text-sm">
-                  <span className="font-bold">
-                    {resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
-                      ? "Payment paid"
-                      : "Remaining balance paid (required)"}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-muted">
-                    {resolveBalanceDue(activeCheckIn) <= 0 || activeCheckIn.paymentStatus === "paid"
-                      ? "Bill already settled."
-                      : "Guest cannot check out until the remaining bill is collected. Check this after payment."}
-                  </span>
-                </span>
               </label>
             </>
           ) : null}

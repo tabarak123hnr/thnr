@@ -785,6 +785,67 @@ export async function checkoutGuest(
   }
 }
 
+export async function clearRoomBill(
+  id: string,
+  options?: {
+    taxPercent?: number;
+    taxRateId?: string | null;
+    taxLabel?: string;
+    paymentMethod?: PaymentMethod | null;
+  },
+) {
+  if (!auth.currentUser) throw new Error("You must be signed in to clear a room bill.");
+
+  const ref = doc(db, "checkIns", id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Check-in not found.");
+
+  const data = snap.data();
+  const paymentTiming = (data.paymentTiming as PaymentTiming) || "due_on_checkout";
+  const priorPaid = Math.max(0, Number(data.amountPaid ?? 0));
+  const isPartial = paymentTiming === "partial" || priorPaid > 0;
+  const bill = isPartial
+    ? null
+    : calcRoomBill(
+        Number(data.nightlyRate ?? 0),
+        String(data.checkInAt ?? ""),
+        String(data.checkOutAt ?? ""),
+        Number(data.extraCharges ?? 0),
+        Number(data.discountPercent ?? 0),
+        {
+          taxPercent: options?.taxPercent ?? 0,
+          taxAppliesToRoom: data.taxAppliesToRoom !== false,
+          taxAppliesToFood: data.taxAppliesToFood !== false,
+        },
+      );
+  const settledTotal = bill?.totalBill ?? Number(data.totalBill ?? 0);
+
+  await updateDoc(ref, {
+    paymentStatus: "paid",
+    amountPaid: settledTotal,
+    balanceDue: 0,
+    ...(bill
+      ? {
+          totalBill: bill.totalBill,
+          taxRateId: options?.taxRateId ?? null,
+          taxLabel: (options?.taxLabel ?? "").trim(),
+          taxPercent: bill.taxPercent,
+          taxAmount: bill.taxAmount,
+        }
+      : {}),
+    checkoutPaymentMethod: isPartial
+      ? (data.checkoutPaymentMethod ?? null)
+      : (options?.paymentMethod ?? null),
+    updatedAt: serverTimestamp(),
+  });
+
+  return {
+    guestName: String(data.guestName ?? ""),
+    roomNumber: String(data.roomNumber ?? ""),
+    totalBill: settledTotal,
+  };
+}
+
 /**
  * Undo a mistaken check-in (not a real guest departure).
  * Clears the room without dirtying it or creating a checkout bill.

@@ -378,7 +378,6 @@ export function CheckInPage() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [verifyingPassword, setVerifyingPassword] = useState(false);
   const [checkingOutId, setCheckingOutId] = useState<string | null>(null);
-  const [checkoutPaymentPaid, setCheckoutPaymentPaid] = useState(true);
   const [checkedOutBy, setCheckedOutBy] = useState("");
 
   const [form, setForm] = useState(emptyForm);
@@ -688,9 +687,6 @@ export function CheckInPage() {
     setSecureAction("checkout");
     setAdminPassword("");
     setPasswordError(null);
-    setCheckoutPaymentPaid(
-      resolveBalanceDue(row) <= 0 || row.paymentStatus === "paid",
-    );
     setCheckoutDiscountPercent("");
     setCheckoutTaxSelect("none");
     setCheckoutCustomTaxPercent("");
@@ -788,17 +784,7 @@ export function CheckInPage() {
         (checkoutPreview?.totalBill ?? pendingEdit.totalBill) -
           resolveAmountPaid(pendingEdit),
       );
-      const billSettled =
-        balanceNow <= 0 ||
-        pendingEdit.paymentStatus === "paid" ||
-        checkoutPaymentPaid;
-      if (!billSettled) {
-        setPasswordError(
-          `Cannot check out — ${formatRs(balanceNow, t.common.rs)} still due. Confirm “Remaining balance paid” after collecting payment.`,
-        );
-        return;
-      }
-      if (balanceNow > 0 && checkoutPaymentPaid && !checkoutPaymentMethod) {
+      if (balanceNow > 0 && !checkoutPaymentMethod) {
         setPasswordError("Select how the guest paid (cash, card, or online).");
         return;
       }
@@ -1549,8 +1535,7 @@ export function CheckInPage() {
                 (secureAction === "checkout" &&
                   pendingEdit != null &&
                   checkoutBalanceDue > 0 &&
-                  (!checkoutPaymentPaid ||
-                    (checkoutPaymentPaid && !checkoutPaymentMethod)))
+                  !checkoutPaymentMethod)
               }
             >
               {verifyingPassword || checkingOutId
@@ -1745,31 +1730,6 @@ export function CheckInPage() {
                   />
                 </SelectField>
               ) : null}
-              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-app bg-app px-4 py-3">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4 accent-[var(--accent)]"
-                  checked={
-                    checkoutBalanceDue <= 0 ||
-                    pendingEdit.paymentStatus === "paid" ||
-                    checkoutPaymentPaid
-                  }
-                  disabled={checkoutBalanceDue <= 0 || pendingEdit.paymentStatus === "paid"}
-                  onChange={(e) => setCheckoutPaymentPaid(e.target.checked)}
-                />
-                <span className="min-w-0 text-sm">
-                  <span className="font-bold text-app">
-                    {checkoutBalanceDue <= 0 || pendingEdit.paymentStatus === "paid"
-                      ? "Payment paid"
-                      : "Remaining balance paid (required)"}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-muted">
-                    {checkoutBalanceDue <= 0 || pendingEdit.paymentStatus === "paid"
-                      ? "Bill already settled — stays marked paid."
-                      : "Guest cannot check out until the remaining bill is collected. Check this after payment."}
-                  </span>
-                </span>
-              </label>
             </>
           ) : null}
 

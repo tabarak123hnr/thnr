@@ -46,6 +46,8 @@ export interface GuestInvoice {
   taxLabel: string;
   taxPercent: number;
   taxAmount: number;
+  roomTaxAmount: number;
+  foodTaxAmount: number;
   taxAppliesToRoom: boolean;
   taxAppliesToFood: boolean;
   totalBill: number;

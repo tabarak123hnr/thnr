@@ -308,13 +308,81 @@ export const GuestInvoiceDocument = forwardRef<
         <div
           style={{
             marginTop: 8,
-            display: "flex",
-            justifyContent: "flex-end",
             borderTop: `1px solid ${RULE}`,
-            paddingTop: 12,
+            paddingTop: 16,
           }}
         >
-          <div style={{ width: 280 }}>
+          {isOverall ? (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: 24,
+              }}
+            >
+              <div>
+                <p style={summaryHeading}>Room breakdown</p>
+                <div style={totalRow}>
+                  <span style={{ color: MUTED }}>Room subtotal</span>
+                  <span>{fmtMoney(invoice.roomChargesBefore || invoice.roomCharges, rs)}</span>
+                </div>
+                {invoice.roomTaxAmount > 0 ? (
+                  <div style={totalRow}>
+                    <span style={{ color: MUTED }}>Room GST</span>
+                    <span>{fmtMoney(invoice.roomTaxAmount, rs)}</span>
+                  </div>
+                ) : null}
+                {invoice.discountAmount > 0 ? (
+                  <div style={totalRow}>
+                    <span style={{ color: MUTED }}>Discount</span>
+                    <span>−{fmtMoney(invoice.discountAmount, rs)}</span>
+                  </div>
+                ) : null}
+              </div>
+              <div>
+                <p style={summaryHeading}>Stay totals</p>
+                <div style={totalRow}>
+                  <span style={{ color: MUTED }}>Room total</span>
+                  <span>{fmtMoney(invoice.roomCharges + invoice.otherExtras, rs)}</span>
+                </div>
+                <div style={totalRow}>
+                  <span style={{ color: MUTED }}>Food subtotal</span>
+                  <span>{fmtMoney(invoice.foodTotal, rs)}</span>
+                </div>
+                {invoice.foodTaxAmount > 0 ? (
+                  <div style={totalRow}>
+                    <span style={{ color: MUTED }}>Food GST</span>
+                    <span>{fmtMoney(invoice.foodTaxAmount, rs)}</span>
+                  </div>
+                ) : null}
+              </div>
+              <div>
+                <p style={summaryHeading}>Settlement</p>
+                <div style={{ ...totalRow, fontWeight: 700 }}>
+                  <span>Total amount</span>
+                  <span>{fmtMoney(invoice.totalBill, rs)}</span>
+                </div>
+                <div style={totalRow}>
+                  <span style={{ color: MUTED }}>Amount paid</span>
+                  <span>{fmtMoney(invoice.amountPaid, rs)}</span>
+                </div>
+                <div
+                  style={{
+                    ...totalRow,
+                    marginTop: 6,
+                    paddingTop: 10,
+                    borderTop: `2px solid ${RULE}`,
+                    fontWeight: 800,
+                    fontSize: 15,
+                  }}
+                >
+                  <span>Balance due</span>
+                  <span>{fmtMoney(invoice.balanceDue, rs)}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+          <div style={{ width: 280, marginLeft: "auto" }}>
             {showRoom ? (
               <>
                 <div style={totalRow}>
@@ -387,6 +455,7 @@ export const GuestInvoiceDocument = forwardRef<
               <span>{fmtMoney(invoice.balanceDue, rs)}</span>
             </div>
           </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -520,6 +589,15 @@ const sectionLabel: CSSProperties = {
   fontSize: 10,
   fontWeight: 700,
   letterSpacing: "0.16em",
+  textTransform: "uppercase",
+  color: MUTED,
+};
+
+const summaryHeading: CSSProperties = {
+  margin: "0 0 8px",
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: "0.12em",
   textTransform: "uppercase",
   color: MUTED,
 };

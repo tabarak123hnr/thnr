@@ -18,6 +18,7 @@ import { formatRs } from "../lib/utils";
 import {
   fetchCheckIns,
   subscribeCheckIns,
+  clearRoomBill,
   type CheckInRecord,
   type PaymentMethod,
 } from "../services/checkIns";
@@ -189,6 +190,19 @@ export function InvoicesPage() {
     [taxRates],
   );
 
+  const roomTaxOptions = useMemo(
+    () => [
+      { value: "none", label: "No GST" },
+      ...taxRates
+        .filter((t) => t.active && t.appliesToRoom)
+        .map((t) => ({ value: t.id, label: `${t.name} (${t.percent}%)` })),
+    ],
+    [taxRates],
+  );
+
+  const clearNeedsPaymentDetails =
+    clearTarget?.type === "restaurant" || clearTarget?.paymentTiming === "due_on_checkout";
+
   const clearTaxRate = useMemo(() => {
     if (clearTaxSelect === "none") return null;
     return taxRates.find((t) => t.id === clearTaxSelect) ?? null;
@@ -196,7 +210,7 @@ export function InvoicesPage() {
 
   const clearPreview = useMemo(() => {
     if (!clearTarget) return { subtotal: 0, gst: 0, total: 0 };
-    const subtotal = clearTarget.foodTotal;
+    const subtotal = clearTarget.type === "room" ? clearTarget.totalBill : clearTarget.foodTotal;
     const pct = clearTaxRate?.percent ?? 0;
     const gst = pct > 0 ? roundMoney((subtotal * pct) / 100) : 0;
     return { subtotal, gst, total: roundMoney(subtotal + gst) };
@@ -213,15 +227,23 @@ export function InvoicesPage() {
     if (!clearTarget) return;
     setClearBusy(true);
     try {
-      const result = await clearGuestFoodBill(clearTarget.checkInId, {
-        taxPercent: clearTaxRate?.percent ?? 0,
-        taxLabel: clearTaxRate?.name,
-        taxRateId: clearTaxRate?.id ?? null,
-        paymentMethod: clearPaymentMethod,
-      });
+      const result = clearTarget.type === "room"
+        ? await clearRoomBill(clearTarget.checkInId, clearNeedsPaymentDetails ? {
+            taxPercent: clearTaxRate?.percent ?? 0,
+            taxLabel: clearTaxRate?.name,
+            taxRateId: clearTaxRate?.id ?? null,
+            paymentMethod: clearPaymentMethod,
+          } : undefined)
+        : await clearGuestFoodBill(clearTarget.checkInId, {
+            taxPercent: clearTaxRate?.percent ?? 0,
+            taxLabel: clearTaxRate?.name,
+            taxRateId: clearTaxRate?.id ?? null,
+            paymentMethod: clearPaymentMethod,
+          });
+      const settledTotal = clearTarget.type === "room" ? result.totalBill : result.folioTotal;
       toastSuccess(
-        "Food bill cleared",
-        `${result.guestName} · Room ${result.roomNumber} — ${formatRs(result.folioTotal, t.common.rs)} settled`,
+        clearTarget.type === "room" ? "Room bill cleared" : "Food bill cleared",
+        `${result.guestName} · Room ${result.roomNumber} — ${formatRs(settledTotal, t.common.rs)} settled`,
       );
       setClearTarget(null);
     } catch (err) {
@@ -443,7 +465,7 @@ export function InvoicesPage() {
                       >
                         Open
                       </Button>
-                      {inv.type === "restaurant" && status !== "paid" ? (
+                      {inv.type !== "overall" && status !== "paid" ? (
                         <Button
                           size="sm"
                           className="cursor-pointer whitespace-nowrap !bg-emerald-600 !text-white hover:!bg-emerald-500 shadow-xs"
@@ -515,7 +537,7 @@ export function InvoicesPage() {
       <Modal
         open={Boolean(clearTarget)}
         onClose={() => !clearBusy && setClearTarget(null)}
-        title="Clear Food Bill"
+        title={clearTarget?.type === "room" ? "Clear Room Bill" : "Clear Food Bill"}
         subtitle={
           clearTarget
             ? `${clearTarget.guestName} · Room ${clearTarget.roomNumber}`
@@ -544,7 +566,7 @@ export function InvoicesPage() {
       >
         {clearTarget ? (
           <div className="space-y-5">
-            {/* Payment method */}
+            {clearNeedsPaymentDetails ? (
             <div>
               <label className="mb-2 block text-sm font-semibold">Payment Method</label>
               <div className="flex gap-2">
@@ -568,17 +590,19 @@ export function InvoicesPage() {
                 ))}
               </div>
             </div>
+            ) : null}
 
-            {/* GST selection */}
+            {clearNeedsPaymentDetails ? (
             <div>
               <label className="mb-2 block text-sm font-semibold">GST / Tax Rate</label>
               <FancySelect
                 value={clearTaxSelect}
                 onChange={setClearTaxSelect}
-                options={foodTaxOptions}
+                options={clearTarget.type === "room" ? roomTaxOptions : foodTaxOptions}
                 placeholder="Select tax rate…"
               />
             </div>
+            ) : null}
 
             {/* Preview */}
             <div className="rounded-xl border border-app bg-elevated p-4">
@@ -587,7 +611,9 @@ export function InvoicesPage() {
               </p>
               <div className="space-y-1.5 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted">Food subtotal</span>
+                  <span className="text-muted">
+                    {clearTarget.type === "room" ? "Room subtotal" : "Food subtotal"}
+                  </span>
                   <span className="font-semibold">
                     {formatRs(clearPreview.subtotal, t.common.rs)}
                   </span>
