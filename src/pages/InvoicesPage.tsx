@@ -602,7 +602,7 @@ export function InvoicesPage() {
                 placeholder="Select tax rate…"
               />
               <p className="mt-2 text-xs text-muted">
-                Choose No GST to keep the food bill tax-free, or pick a GST rate to add tax before clearing it.
+                Choose No GST to keep this bill tax-free, or pick a GST rate to add tax before clearing it.
               </p>
             </div>
             ) : null}

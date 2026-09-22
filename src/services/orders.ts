@@ -394,10 +394,6 @@ export async function clearGuestFoodBill(
     updatedAt: serverTimestamp(),
   });
 
-  if (balanceToCollect > 0) {
-    await adjustCheckInExtraCharges(checkInId, 0, { paidDelta: balanceToCollect });
-  }
-
   return {
     foodSubtotal,
     foodTax,

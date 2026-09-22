@@ -13,7 +13,13 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
-import { calcCheckoutBill, calcRoomBill, clampDiscountPercent, taxOptionsFromStay } from "../lib/billing";
+import {
+  calcCheckoutBill,
+  calcRoomBill,
+  clampDiscountPercent,
+  roundMoney,
+  taxOptionsFromStay,
+} from "../lib/billing";
 import type {
   CheckInCompanion,
   CheckInRecord,
@@ -130,6 +136,8 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
       : split.balanceDue,
     checkInPaymentMethod: parsePaymentMethod(data.checkInPaymentMethod),
     checkoutPaymentMethod: parsePaymentMethod(data.checkoutPaymentMethod),
+    roomBillPaymentMethod: parsePaymentMethod(data.roomBillPaymentMethod),
+    roomBillClearedAt: data.roomBillClearedAt ? String(data.roomBillClearedAt) : null,
     nightlyRate: computed?.nightlyRate ?? nightlyRate,
     discountPercent: Number(data.discountPercent ?? computed?.discountPercent ?? discountPercent),
     discountAmount: Number(data.discountAmount ?? computed?.discountAmount ?? 0),
@@ -801,48 +809,60 @@ export async function clearRoomBill(
   if (!snap.exists()) throw new Error("Check-in not found.");
 
   const data = snap.data();
-  const paymentTiming = (data.paymentTiming as PaymentTiming) || "due_on_checkout";
+  const ordersSnap = await getDocs(
+    query(collection(db, "orders"), where("checkInId", "==", id)),
+  );
+  const foodSubtotal = roundMoney(
+    ordersSnap.docs.reduce((sum, order) => sum + (Number(order.data().amount) || 0), 0),
+  );
+  const foodTaxPercent = Number(data.foodTaxPercent ?? 0) || 0;
+  const foodTax = foodTaxPercent > 0
+    ? roundMoney((foodSubtotal * foodTaxPercent) / 100)
+    : 0;
+  const foodPaid = data.foodBillClearedAt
+    ? roundMoney(foodSubtotal + foodTax)
+    : ordersSnap.docs
+        .filter((order) => String(order.data().paymentStatus ?? "due") === "paid")
+        .reduce((sum, order) => sum + (Number(order.data().amount) || 0), 0);
   const priorPaid = Math.max(0, Number(data.amountPaid ?? 0));
-  const isPartial = paymentTiming === "partial" || priorPaid > 0;
-  const bill = isPartial
-    ? null
-    : calcRoomBill(
-        Number(data.nightlyRate ?? 0),
-        String(data.checkInAt ?? ""),
-        String(data.checkOutAt ?? ""),
-        Number(data.extraCharges ?? 0),
-        Number(data.discountPercent ?? 0),
-        {
-          taxPercent: options?.taxPercent ?? 0,
-          taxAppliesToRoom: data.taxAppliesToRoom !== false,
-          taxAppliesToFood: data.taxAppliesToFood !== false,
-        },
-      );
-  const settledTotal = bill?.totalBill ?? Number(data.totalBill ?? 0);
-
+  const roomPaidBeforeClear = Math.max(0, priorPaid - foodPaid);
+  const roomAlreadyPartial = roomPaidBeforeClear > 0;
+  const roomExtraCharges = Math.max(
+    0,
+    (Number(data.extraCharges ?? 0) || 0) - foodSubtotal,
+  );
+  const bill = calcRoomBill(
+    Number(data.nightlyRate ?? 0),
+    String(data.checkInAt ?? ""),
+    String(data.checkOutAt ?? ""),
+    roomExtraCharges,
+    Number(data.discountPercent ?? 0),
+    {
+      taxPercent: roomAlreadyPartial
+        ? Number(data.taxPercent ?? 0) || 0
+        : options?.taxPercent ?? 0,
+      taxAppliesToRoom: data.taxAppliesToRoom !== false,
+      taxAppliesToFood: false,
+    },
+  );
   await updateDoc(ref, {
-    paymentStatus: "paid",
-    amountPaid: settledTotal,
-    balanceDue: 0,
-    ...(bill
-      ? {
-          totalBill: bill.totalBill,
-          taxRateId: options?.taxRateId ?? null,
-          taxLabel: (options?.taxLabel ?? "").trim(),
-          taxPercent: bill.taxPercent,
-          taxAmount: bill.taxAmount,
-        }
-      : {}),
-    checkoutPaymentMethod: isPartial
-      ? (data.checkoutPaymentMethod ?? null)
+    taxRateId: roomAlreadyPartial ? (data.taxRateId ?? null) : (options?.taxRateId ?? null),
+    taxLabel: roomAlreadyPartial
+      ? String(data.taxLabel ?? "")
+      : (options?.taxLabel ?? "").trim(),
+    taxPercent: bill.taxPercent,
+    taxAmount: bill.taxAmount,
+    roomBillPaymentMethod: roomAlreadyPartial
+      ? (data.roomBillPaymentMethod ?? null)
       : (options?.paymentMethod ?? null),
+    roomBillClearedAt: new Date().toISOString(),
     updatedAt: serverTimestamp(),
   });
 
   return {
     guestName: String(data.guestName ?? ""),
     roomNumber: String(data.roomNumber ?? ""),
-    totalBill: settledTotal,
+    totalBill: bill.totalBill,
   };
 }
 

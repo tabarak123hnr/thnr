@@ -60,6 +60,9 @@ export interface CheckInRecord {
   checkInPaymentMethod: PaymentMethod | null;
   /** Method used when the remaining balance was collected at checkout. */
   checkoutPaymentMethod: PaymentMethod | null;
+  /** Method used when the room folio itself was cleared from Invoices. */
+  roomBillPaymentMethod: PaymentMethod | null;
+  roomBillClearedAt: string | null;
   /** Snapshot of room rate at check-in / last update (before discount) */
   nightlyRate: number;
   /** 0–100 off room (after GST) */

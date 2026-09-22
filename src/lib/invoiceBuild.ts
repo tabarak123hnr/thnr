@@ -85,6 +85,7 @@ function formatPaymentMethodName(m: PaymentMethod | string | null | undefined): 
 }
 
 function resolveRoomPaymentMethod(row: CheckInRecord, settled: boolean): string | null {
+  if (row.roomBillPaymentMethod) return formatPaymentMethodName(row.roomBillPaymentMethod);
   const inMethod = row.checkInPaymentMethod ? formatPaymentMethodName(row.checkInPaymentMethod) : null;
   const outMethod = row.checkoutPaymentMethod ? formatPaymentMethodName(row.checkoutPaymentMethod) : null;
   if (inMethod && outMethod && inMethod !== outMethod) {
@@ -174,8 +175,9 @@ export function buildRoomInvoice(
   const foodPretax = stayOrders.reduce((s, o) => s + (o.amount || 0), 0);
   const settled = isStaySettled(row);
 
-  const foodPaidTickets = settled
-    ? stayOrders.reduce((s, o) => s + (o.amount || 0), 0)
+  const foodTax = foodGstForStay(row, foodPretax).taxAmount;
+  const foodPaidTickets = settled || row.foodBillClearedAt
+    ? roundMoney(foodPretax + foodTax)
     : stayOrders
         .filter((o) => o.paymentStatus === "paid")
         .reduce((s, o) => s + (o.amount || 0), 0);
@@ -187,9 +189,9 @@ export function buildRoomInvoice(
   const roomTax = bill.taxAppliesToRoom
     ? roundMoney((bill.roomChargesBefore * pct) / 100)
     : 0;
-  // Non-food extras follow the same rule as stay extras tax when food GST is on
+  // Only room-side extras belong to the room folio; food GST is separate.
   const otherExtrasTax =
-    otherExtras > 0 && pct > 0 && (bill.taxAppliesToFood || bill.taxAppliesToRoom)
+    otherExtras > 0 && pct > 0 && bill.taxAppliesToRoom
       ? roundMoney((otherExtras * pct) / 100)
       : 0;
   const taxAmount = roundMoney(roomTax + otherExtrasTax);
@@ -199,11 +201,14 @@ export function buildRoomInvoice(
   );
 
   const stayPaid = Math.max(0, Number(row.amountPaid) || 0);
-  const roomPaidRaw = settled ? roomTotal : Math.max(0, stayPaid - foodPaidTickets);
+  const roomPaidRaw = row.roomBillClearedAt || settled
+    ? roomTotal
+    : Math.max(0, stayPaid - foodPaidTickets);
   const split = paymentFromSplit(roomTotal, roomPaidRaw);
+  const roomCleared = Boolean(row.roomBillClearedAt);
 
   let paymentTiming: PaymentTiming = row.paymentTiming;
-  if (split.balanceDue <= 0) paymentTiming = "paid_at_checkin";
+  if (roomCleared || split.balanceDue <= 0) paymentTiming = "paid_at_checkin";
   else if (split.amountPaid > 0) paymentTiming = "partial";
   else paymentTiming = "due_on_checkout";
 

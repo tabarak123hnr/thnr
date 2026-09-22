@@ -50,6 +50,8 @@ export const GuestInvoiceDocument = forwardRef<
   const status = invoiceListStatus(invoice);
   const statusLabel =
     status === "paid" ? "Paid" : status === "partial" ? "Partial" : "Due";
+  const roomGstPending =
+    isOverall && invoice.paymentTiming === "due_on_checkout" && invoice.roomTaxAmount <= 0;
 
   return (
     <div
@@ -313,13 +315,8 @@ export const GuestInvoiceDocument = forwardRef<
           }}
         >
           {isOverall ? (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr",
-                gap: 24,
-              }}
-            >
+            <>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
               <div>
                 <p style={summaryHeading}>Room breakdown</p>
                 <div style={totalRow}>
@@ -338,13 +335,15 @@ export const GuestInvoiceDocument = forwardRef<
                     <span>−{fmtMoney(invoice.discountAmount, rs)}</span>
                   </div>
                 ) : null}
+                <div style={{ ...totalRow, marginTop: 6, borderTop: `1px solid ${LINE}`, paddingTop: 8 }}>
+                  <span style={{ color: MUTED }}>Room total</span>
+                  <span>
+                    {fmtMoney(invoice.roomCharges + invoice.otherExtras + invoice.roomTaxAmount, rs)}
+                  </span>
+                </div>
               </div>
               <div>
-                <p style={summaryHeading}>Stay totals</p>
-                <div style={totalRow}>
-                  <span style={{ color: MUTED }}>Room total</span>
-                  <span>{fmtMoney(invoice.roomCharges + invoice.otherExtras, rs)}</span>
-                </div>
+                <p style={summaryHeading}>Food breakdown</p>
                 <div style={totalRow}>
                   <span style={{ color: MUTED }}>Food subtotal</span>
                   <span>{fmtMoney(invoice.foodTotal, rs)}</span>
@@ -356,16 +355,28 @@ export const GuestInvoiceDocument = forwardRef<
                   </div>
                 ) : null}
               </div>
+            </div>
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${LINE}` }}>
+              <p style={summaryHeading}>Settlement</p>
+              {roomGstPending ? (
+                <p style={{ margin: "0 0 8px", fontSize: 11, color: MUTED }}>
+                  Room GST will be added when the due room bill is cleared at checkout.
+                </p>
+              ) : null}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24 }}>
               <div>
-                <p style={summaryHeading}>Settlement</p>
                 <div style={{ ...totalRow, fontWeight: 700 }}>
-                  <span>Total amount</span>
+                  <span>{roomGstPending ? "Current total" : "Total amount"}</span>
                   <span>{fmtMoney(invoice.totalBill, rs)}</span>
                 </div>
+              </div>
+              <div>
                 <div style={totalRow}>
                   <span style={{ color: MUTED }}>Amount paid</span>
                   <span>{fmtMoney(invoice.amountPaid, rs)}</span>
                 </div>
+              </div>
+              <div>
                 <div
                   style={{
                     ...totalRow,
@@ -380,7 +391,9 @@ export const GuestInvoiceDocument = forwardRef<
                   <span>{fmtMoney(invoice.balanceDue, rs)}</span>
                 </div>
               </div>
+              </div>
             </div>
+            </>
           ) : (
           <div style={{ width: 280, marginLeft: "auto" }}>
             {showRoom ? (
