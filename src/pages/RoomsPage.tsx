@@ -14,7 +14,6 @@ import { calcCheckoutBill } from "../lib/billing";
 import { uploadImagesToCloudinary } from "../lib/cloudinary";
 import {
   resolveAmountPaid,
-  resolveBalanceDue,
 } from "../lib/paymentDisplay";
 import { cn, formatRs } from "../lib/utils";
 import {
@@ -271,11 +270,6 @@ export function RoomsPage() {
       setCheckoutError("Enter who is checking the guest out.");
       return;
     }
-    const balanceNow = Math.max(
-      0,
-      (checkoutPreview?.totalBill ?? activeCheckIn.totalBill) -
-        resolveAmountPaid(activeCheckIn),
-    );
     setCheckoutBusy(true);
     setCheckoutError(null);
     try {
@@ -824,7 +818,7 @@ export function RoomsPage() {
               disabled={
                 checkoutBusy ||
                 !checkoutPassword ||
-                !checkedOutBy.trim() ||
+                !checkedOutBy.trim()
               }
             >
               {checkoutBusy ? "Checking out…" : "Check out"}
@@ -893,7 +887,6 @@ export function RoomsPage() {
                   placeholder="Staff name"
                 />
               </Field>
-              </label>
             </>
           ) : null}
           <Field label="Your password">

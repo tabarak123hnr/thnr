@@ -111,11 +111,6 @@ export function InvoicesPage() {
     [checkIns, orders],
   );
 
-  const checkInById = useMemo(
-    () => new Map(checkIns.map((row) => [row.id, row])),
-    [checkIns],
-  );
-
   const overallInvoices = useMemo(
     () => buildOverallInvoices(checkIns, orders),
     [checkIns, orders],
@@ -245,7 +240,7 @@ export function InvoicesPage() {
             taxRateId: clearTaxRate?.id ?? null,
             paymentMethod: clearPaymentMethod,
           });
-      const settledTotal = clearTarget.type === "room" ? result.totalBill : result.folioTotal;
+      const settledTotal = "totalBill" in result ? result.totalBill : result.folioTotal;
       toastSuccess(
         clearTarget.type === "room" ? "Room bill cleared" : "Food bill cleared",
         `${result.guestName} · Room ${result.roomNumber} — ${formatRs(settledTotal, t.common.rs)} settled`,
@@ -426,8 +421,6 @@ export function InvoicesPage() {
           >
             {filtered.map((inv) => {
               const status = invoiceListStatus(inv);
-              const stay = checkInById.get(inv.checkInId);
-              const canClearFoodBill = inv.type === "restaurant" && !stay?.foodBillClearedAt;
               return (
                 <Tr key={inv.id}>
                   <Td className="font-bold font-mono text-xs sm:text-sm">
