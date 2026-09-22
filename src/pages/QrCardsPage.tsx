@@ -34,7 +34,7 @@ export function QrCardsPage() {
 
           <p className="mt-4 text-sm font-semibold">{f.scanToFeedback}</p>
 
-          <a href={FEEDBACK_QR_PATH} download="tabarak-feedback-qr.png" className="mt-5">
+          <a href={FEEDBACK_QR_PATH} download="tabarak-qrcode_thnr.vercel.app.png" className="mt-5">
             <Button
               type="button"
               variant="secondary"

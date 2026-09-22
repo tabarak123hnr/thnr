@@ -1,8 +1,8 @@
 /** Static QR PNG in /public — encodes the guest feedback form URL. */
-export const FEEDBACK_QR_PATH = "/feedback-qr.png";
+export const FEEDBACK_QR_PATH = "/qrcode_thnr.vercel.app.png";
 
 /** Inline CID used in check-in emails (works in Gmail without a public image URL). */
-export const FEEDBACK_QR_CID = "feedback-qr@tabarak";
+export const FEEDBACK_QR_CID = "qrcode_thnr.vercel.app.png@tabarak";
 
 /**
  * Public guest feedback form URL from env (FEEDBACK_LINK).
@@ -63,7 +63,7 @@ export async function loadFeedbackQrAttachment(): Promise<FeedbackQrAttachment |
     let binary = "";
     for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!);
     return {
-      filename: "feedback-qr.png",
+      filename: "qrcode_thnr.vercel.app.png",
       content: btoa(binary),
       encoding: "base64",
       cid: FEEDBACK_QR_CID,

@@ -111,6 +111,11 @@ export function InvoicesPage() {
     [checkIns, orders],
   );
 
+  const checkInById = useMemo(
+    () => new Map(checkIns.map((row) => [row.id, row])),
+    [checkIns],
+  );
+
   const overallInvoices = useMemo(
     () => buildOverallInvoices(checkIns, orders),
     [checkIns, orders],
@@ -421,6 +426,8 @@ export function InvoicesPage() {
           >
             {filtered.map((inv) => {
               const status = invoiceListStatus(inv);
+              const stay = checkInById.get(inv.checkInId);
+              const canClearFoodBill = inv.type === "restaurant" && !stay?.foodBillClearedAt;
               return (
                 <Tr key={inv.id}>
                   <Td className="font-bold font-mono text-xs sm:text-sm">
@@ -601,6 +608,9 @@ export function InvoicesPage() {
                 options={clearTarget.type === "room" ? roomTaxOptions : foodTaxOptions}
                 placeholder="Select tax rate…"
               />
+              <p className="mt-2 text-xs text-muted">
+                Choose No GST to keep the food bill tax-free, or pick a GST rate to add tax before clearing it.
+              </p>
             </div>
             ) : null}
 
