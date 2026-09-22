@@ -796,6 +796,7 @@ export async function checkoutGuest(
 export async function clearRoomBill(
   id: string,
   options?: {
+    discountPercent?: number;
     taxPercent?: number;
     taxRateId?: string | null;
     taxLabel?: string;
@@ -836,7 +837,9 @@ export async function clearRoomBill(
     String(data.checkInAt ?? ""),
     String(data.checkOutAt ?? ""),
     roomExtraCharges,
-    Number(data.discountPercent ?? 0),
+    roomAlreadyPartial
+      ? Number(data.discountPercent ?? 0)
+      : clampDiscountPercent(options?.discountPercent ?? 0),
     {
       taxPercent: roomAlreadyPartial
         ? Number(data.taxPercent ?? 0) || 0
@@ -846,6 +849,13 @@ export async function clearRoomBill(
     },
   );
   await updateDoc(ref, {
+    nights: bill.nights,
+    roomCharges: bill.roomCharges,
+    subtotal: bill.subtotal,
+    extraCharges: roomExtraCharges + foodSubtotal,
+    discountPercent: bill.discountPercent,
+    discountAmount: bill.discountAmount,
+    discountedNightlyRate: bill.discountedNightlyRate,
     taxRateId: roomAlreadyPartial ? (data.taxRateId ?? null) : (options?.taxRateId ?? null),
     taxLabel: roomAlreadyPartial
       ? String(data.taxLabel ?? "")

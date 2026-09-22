@@ -8,7 +8,7 @@ import { FancySelect } from "../components/ui/FancySelect";
 import { Modal } from "../components/ui/Modal";
 import { EmptyState, PageHeader, StatCard } from "../components/ui/Page";
 import { Table, Td, Tr } from "../components/ui/Table";
-import { roundMoney } from "../lib/billing";
+import { calcRoomBill, clampDiscountPercent, roundMoney, taxOptionsFromStay } from "../lib/billing";
 import { useApp } from "../context/app-context";
 import { useToast } from "../context/toast-context";
 import { downloadCsv, toCsv } from "../lib/exportSpreadsheet";
@@ -91,6 +91,7 @@ export function InvoicesPage() {
   const [clearTarget, setClearTarget] = useState<GuestInvoice | null>(null);
   const [clearPaymentMethod, setClearPaymentMethod] = useState<PaymentMethod>("cash");
   const [clearTaxSelect, setClearTaxSelect] = useState("none");
+  const [clearDiscountPercent, setClearDiscountPercent] = useState("");
   const [clearBusy, setClearBusy] = useState(false);
 
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -210,16 +211,36 @@ export function InvoicesPage() {
 
   const clearPreview = useMemo(() => {
     if (!clearTarget) return { subtotal: 0, gst: 0, total: 0 };
-    const subtotal = clearTarget.type === "room" ? clearTarget.totalBill : clearTarget.foodTotal;
+    if (clearTarget.type === "room") {
+      const bill = calcRoomBill(
+        clearTarget.nightlyRate,
+        clearTarget.checkInAt,
+        clearTarget.checkOutAt,
+        clearTarget.otherExtras,
+        clampDiscountPercent(clearDiscountPercent),
+        {
+          ...taxOptionsFromStay(clearTarget),
+          taxPercent: clearTaxRate?.percent ?? 0,
+          taxAppliesToFood: false,
+        },
+      );
+      return {
+        subtotal: bill.roomChargesBefore + bill.extraCharges,
+        gst: bill.taxAmount,
+        total: bill.totalBill,
+      };
+    }
+    const subtotal = clearTarget.foodTotal;
     const pct = clearTaxRate?.percent ?? 0;
     const gst = pct > 0 ? roundMoney((subtotal * pct) / 100) : 0;
     return { subtotal, gst, total: roundMoney(subtotal + gst) };
-  }, [clearTarget, clearTaxRate]);
+  }, [clearTarget, clearTaxRate, clearDiscountPercent]);
 
   function openClearBill(inv: GuestInvoice) {
     setClearTarget(inv);
     setClearPaymentMethod("cash");
     setClearTaxSelect("none");
+    setClearDiscountPercent("");
     setClearBusy(false);
   }
 
@@ -229,6 +250,7 @@ export function InvoicesPage() {
     try {
       const result = clearTarget.type === "room"
         ? await clearRoomBill(clearTarget.checkInId, clearNeedsPaymentDetails ? {
+            discountPercent: clampDiscountPercent(clearDiscountPercent),
             taxPercent: clearTaxRate?.percent ?? 0,
             taxLabel: clearTaxRate?.name,
             taxRateId: clearTaxRate?.id ?? null,
@@ -566,6 +588,24 @@ export function InvoicesPage() {
       >
         {clearTarget ? (
           <div className="space-y-5">
+            {clearTarget.type === "room" && clearNeedsPaymentDetails ? (
+              <div>
+                <label className="mb-2 block text-sm font-semibold">Room discount (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={clearDiscountPercent}
+                  onChange={(e) => setClearDiscountPercent(e.target.value)}
+                  placeholder="0"
+                  className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+                />
+                <p className="mt-2 text-xs text-muted">
+                  Applied to room price plus room GST, like check-in billing.
+                </p>
+              </div>
+            ) : null}
             {clearNeedsPaymentDetails ? (
             <div>
               <label className="mb-2 block text-sm font-semibold">Payment Method</label>

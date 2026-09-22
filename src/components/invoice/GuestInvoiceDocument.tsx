@@ -316,8 +316,8 @@ export const GuestInvoiceDocument = forwardRef<
         >
           {isOverall ? (
             <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
-              <div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+              <div style={summaryPanel}>
                 <p style={summaryHeading}>Room breakdown</p>
                 <div style={totalRow}>
                   <span style={{ color: MUTED }}>Room subtotal</span>
@@ -335,14 +335,14 @@ export const GuestInvoiceDocument = forwardRef<
                     <span>−{fmtMoney(invoice.discountAmount, rs)}</span>
                   </div>
                 ) : null}
-                <div style={{ ...totalRow, marginTop: 6, borderTop: `1px solid ${LINE}`, paddingTop: 8 }}>
+                <div style={{ ...totalRow, marginTop: 8, borderTop: `1px solid ${LINE}`, paddingTop: 10, fontWeight: 700 }}>
                   <span style={{ color: MUTED }}>Room total</span>
                   <span>
                     {fmtMoney(invoice.roomCharges + invoice.otherExtras + invoice.roomTaxAmount, rs)}
                   </span>
                 </div>
               </div>
-              <div>
+              <div style={summaryPanel}>
                 <p style={summaryHeading}>Food breakdown</p>
                 <div style={totalRow}>
                   <span style={{ color: MUTED }}>Food subtotal</span>
@@ -354,16 +354,20 @@ export const GuestInvoiceDocument = forwardRef<
                     <span>{fmtMoney(invoice.foodTaxAmount, rs)}</span>
                   </div>
                 ) : null}
+                <div style={{ ...totalRow, marginTop: 8, borderTop: `1px solid ${LINE}`, paddingTop: 10, fontWeight: 700 }}>
+                  <span style={{ color: MUTED }}>Food total</span>
+                  <span>{fmtMoney(invoice.foodTotal + invoice.foodTaxAmount, rs)}</span>
+                </div>
               </div>
             </div>
-            <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${LINE}` }}>
+            <div style={{ marginTop: 24, paddingTop: 18, borderTop: `1px solid ${LINE}` }}>
               <p style={summaryHeading}>Settlement</p>
               {roomGstPending ? (
                 <p style={{ margin: "0 0 8px", fontSize: 11, color: MUTED }}>
                   Room GST will be added when the due room bill is cleared at checkout.
                 </p>
               ) : null}
-              <div style={{ width: 360, maxWidth: "100%", marginLeft: "auto" }}>
+              <div style={{ width: 520, maxWidth: "100%", margin: "0 auto" }}>
                 <div style={{ ...totalRow, fontWeight: 700 }}>
                   <span>{roomGstPending ? "Current total" : "Total amount"}</span>
                   <span>{fmtMoney(invoice.totalBill, rs)}</span>
@@ -607,6 +611,12 @@ const summaryHeading: CSSProperties = {
   letterSpacing: "0.12em",
   textTransform: "uppercase",
   color: MUTED,
+};
+
+const summaryPanel: CSSProperties = {
+  border: `1px solid ${LINE}`,
+  padding: "14px 16px 12px",
+  background: PAPER,
 };
 
 const partyName: CSSProperties = {
