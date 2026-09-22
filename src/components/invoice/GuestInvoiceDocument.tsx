@@ -363,20 +363,15 @@ export const GuestInvoiceDocument = forwardRef<
                   Room GST will be added when the due room bill is cleared at checkout.
                 </p>
               ) : null}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24 }}>
-              <div>
+              <div style={{ width: 360, maxWidth: "100%", marginLeft: "auto" }}>
                 <div style={{ ...totalRow, fontWeight: 700 }}>
                   <span>{roomGstPending ? "Current total" : "Total amount"}</span>
                   <span>{fmtMoney(invoice.totalBill, rs)}</span>
                 </div>
-              </div>
-              <div>
                 <div style={totalRow}>
                   <span style={{ color: MUTED }}>Amount paid</span>
                   <span>{fmtMoney(invoice.amountPaid, rs)}</span>
                 </div>
-              </div>
-              <div>
                 <div
                   style={{
                     ...totalRow,
@@ -390,7 +385,6 @@ export const GuestInvoiceDocument = forwardRef<
                   <span>Balance due</span>
                   <span>{fmtMoney(invoice.balanceDue, rs)}</span>
                 </div>
-              </div>
               </div>
             </div>
             </>
