@@ -402,13 +402,20 @@ export const GuestInvoiceDocument = forwardRef<
               ) : null}
             </div>
             <div style={{ marginTop: 24, paddingTop: 18, borderTop: `1px solid ${LINE}` }}>
-              <p style={summaryHeading}>Settlement</p>
+              <p style={{ ...summaryHeading, textAlign: "right" }}>Settlement</p>
               {roomGstPending ? (
                 <p style={{ margin: "0 0 8px", fontSize: 11, color: MUTED }}>
                   Room GST will be added when the due room bill is cleared at checkout.
                 </p>
               ) : null}
-              <div style={{ width: 520, maxWidth: "100%", margin: "0 auto" }}>
+              <div
+                style={{
+                  width: 360,
+                  maxWidth: "100%",
+                  marginLeft: "auto",
+                  textAlign: "right",
+                }}
+              >
                 <div style={{ ...totalRow, fontWeight: 700 }}>
                   <span>{roomGstPending ? "Current total" : "Total amount"}</span>
                   <span>{fmtMoney(invoice.totalBill, rs)}</span>
@@ -434,7 +441,14 @@ export const GuestInvoiceDocument = forwardRef<
             </div>
             </>
           ) : (
-          <div style={{ width: 280, marginLeft: "auto" }}>
+          <div
+            style={{
+              width: 360,
+              maxWidth: "100%",
+              marginLeft: "auto",
+              textAlign: "right",
+            }}
+          >
             {isMisc ? (
               <>
                 <div style={totalRow}>
