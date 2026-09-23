@@ -12,9 +12,6 @@ import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
 import { calcCheckoutBill } from "../lib/billing";
 import { uploadImagesToCloudinary } from "../lib/cloudinary";
-import {
-  resolveAmountPaid,
-} from "../lib/paymentDisplay";
 import { cn, formatRs } from "../lib/utils";
 import {
   subscribeBookingRequests,
@@ -829,52 +826,12 @@ export function RoomsPage() {
         <form id="room-checkout-form" className="space-y-4" onSubmit={(e) => void submitCheckout(e)}>
           {checkoutPreview ? (
             <div className="rounded-2xl border border-app bg-app px-4 py-3 text-sm">
-              {checkoutPreview.early ? (
-                <>
-                  <p className="text-muted">
-                    Planned: {checkoutPreview.plannedNights} night(s) (
-                    {formatRs(checkoutPreview.plannedTotal, t.common.rs)})
-                  </p>
-                  <p className="mt-1 font-bold">
-                    Early leave bill: {checkoutPreview.nights} night(s) (
-                    {formatRs(checkoutPreview.totalBill, t.common.rs)})
-                  </p>
-                </>
-              ) : (
-                <p className="font-bold">
-                  Bill: {checkoutPreview.nights} night(s) ·{" "}
-                  {formatRs(checkoutPreview.totalBill, t.common.rs)}
-                </p>
-              )}
-              {checkoutPreview.discountPercent > 0 ? (
-                <p className="mt-1 text-xs text-muted">
-                  Room discount {checkoutPreview.discountPercent}% (
-                  −{formatRs(checkoutPreview.discountAmount, t.common.rs)}) is
-                  included.
-                </p>
-              ) : null}
-              {activeCheckIn ? (
-                <div className="mt-2 space-y-0.5 border-t border-app pt-2 text-xs">
-                  <p className="flex justify-between gap-2">
-                    <span className="text-muted">Already paid</span>
-                    <span className="font-semibold">
-                      {formatRs(resolveAmountPaid(activeCheckIn), t.common.rs)}
-                    </span>
-                  </p>
-                  <p className="flex justify-between gap-2">
-                    <span className="text-muted">Balance due</span>
-                    <span className="font-bold">
-                      {formatRs(
-                        Math.max(
-                          0,
-                          checkoutPreview.totalBill - resolveAmountPaid(activeCheckIn),
-                        ),
-                        t.common.rs,
-                      )}
-                    </span>
-                  </p>
-                </div>
-              ) : null}
+              <p className="font-bold">
+                Room {activeCheckIn?.roomNumber ?? "-"} · {activeCheckIn?.guestName ?? "Guest"}
+              </p>
+              <p className="mt-2 text-sm text-muted">
+                This will check the guest out and make the room available for housekeeping.
+              </p>
             </div>
           ) : null}
           {activeCheckIn ? (

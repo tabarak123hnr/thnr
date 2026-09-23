@@ -1475,68 +1475,9 @@ export function CheckInPage() {
               <p className="font-bold">
                 Room {pendingEdit.roomNumber} · {pendingEdit.guestName}
               </p>
-              {checkoutPreview.early ? (
-                <p className="mt-1 text-muted">
-                  Early leave — bill adjusts from{" "}
-                  <span className="font-semibold text-app">
-                    {checkoutPreview.plannedNights} night(s) (
-                    {formatRs(checkoutPreview.plannedTotal, t.common.rs)})
-                  </span>{" "}
-                  to{" "}
-                  <span className="font-semibold text-[var(--accent)]">
-                    {checkoutPreview.nights} night(s) (
-                    {formatRs(checkoutPreview.totalBill, t.common.rs)})
-                  </span>
-                  .
-                </p>
-              ) : (
-                <p className="mt-1 text-muted">
-                  Bill:{" "}
-                  <span className="font-semibold text-[var(--accent)]">
-                    {checkoutPreview.nights} night(s) ·{" "}
-                    {formatRs(checkoutPreview.totalBill, t.common.rs)}
-                  </span>
-                </p>
-              )}
-              {checkoutPreview.discountPercent > 0 ? (
-                <p className="mt-1 text-xs text-muted">
-                  Room discount {checkoutPreview.discountPercent}% (
-                  −{formatRs(checkoutPreview.discountAmount, t.common.rs)}) is
-                  included.
-                </p>
-              ) : null}
-              {checkoutPreview.taxAmount > 0 ? (
-                <p className="mt-1 text-xs text-muted">
-                  GST {checkoutPreview.taxPercent}% (
-                  {formatRs(checkoutPreview.taxAmount, t.common.rs)}) is included.
-                </p>
-              ) : null}
-              <p className="mt-2 text-xs text-muted">
-                Room will become available and marked dirty for housekeeping.
+              <p className="mt-2 text-sm text-muted">
+                This will check the guest out and make the room available for housekeeping.
               </p>
-              {(resolveAmountPaid(pendingEdit) > 0 || resolveBalanceDue(pendingEdit) > 0) && (
-                <div className="mt-2 space-y-0.5 border-t border-[color-mix(in_oklab,var(--accent)_25%,transparent)] pt-2 text-xs">
-                  <p className="flex justify-between gap-2">
-                    <span className="text-muted">Already paid</span>
-                    <span className="font-semibold text-app">
-                      {formatRs(resolveAmountPaid(pendingEdit), t.common.rs)}
-                    </span>
-                  </p>
-                  <p className="flex justify-between gap-2">
-                    <span className="text-muted">Balance due now</span>
-                    <span className="font-bold text-[var(--accent)]">
-                      {formatRs(
-                        Math.max(
-                          0,
-                          (checkoutPreview?.totalBill ?? pendingEdit.totalBill) -
-                            resolveAmountPaid(pendingEdit),
-                        ),
-                        t.common.rs,
-                      )}
-                    </span>
-                  </p>
-                </div>
-              )}
             </div>
           ) : (
             <div className="rounded-xl border border-app bg-app px-4 py-3 text-sm text-muted">
