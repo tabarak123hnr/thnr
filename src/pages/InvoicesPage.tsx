@@ -96,16 +96,6 @@ function paymentMethodTone(method: string | null | undefined): "success" | "info
   return "default";
 }
 
-const MISC_PRESETS = [
-  { label: "Laundry", icon: "🧺", defaultPrice: 300 },
-  { label: "Bedsheet", icon: "🛏️", defaultPrice: 500 },
-  { label: "Ironing", icon: "👔", defaultPrice: 150 },
-  { label: "Dry Cleaning", icon: "🧼", defaultPrice: 600 },
-  { label: "Extra Towels", icon: "🧻", defaultPrice: 200 },
-  { label: "Room Cleaning", icon: "🧹", defaultPrice: 400 },
-  { label: "Car Wash", icon: "🚗", defaultPrice: 500 },
-];
-
 export function InvoicesPage() {
   const { t } = useApp();
   const { success: toastSuccess, error: toastError } = useToast();
@@ -130,6 +120,7 @@ export function InvoicesPage() {
   const [clearAccountNumber, setClearAccountNumber] = useState("");
   const [clearTaxSelect, setClearTaxSelect] = useState("none");
   const [clearDiscountPercent, setClearDiscountPercent] = useState("");
+  const [clearServiceCharge, setClearServiceCharge] = useState("");
   const [clearBusy, setClearBusy] = useState(false);
 
   /* ── Add Miscellaneous modal state ── */
@@ -137,9 +128,7 @@ export function InvoicesPage() {
   const [miscStayId, setMiscStayId] = useState("");
   const [miscGuestName, setMiscGuestName] = useState("");
   const [miscRoomNumber, setMiscRoomNumber] = useState("");
-  const [miscItems, setMiscItems] = useState<{ name: string; qty: number; unitPrice: number }[]>([
-    { name: "Laundry", qty: 1, unitPrice: 300 },
-  ]);
+  const [miscItems, setMiscItems] = useState<{ name: string; qty: number; unitPrice: number }[]>([]);
   const [miscPaymentTiming, setMiscPaymentTiming] = useState<"due" | "paid">("due");
   const [miscPaymentMethod, setMiscPaymentMethod] = useState<PaymentMethod>("cash");
   const [miscNotes, setMiscNotes] = useState("");
@@ -269,16 +258,16 @@ export function InvoicesPage() {
   }, [taxRates, clearTaxSelect]);
 
   const clearPreview = useMemo(() => {
-    if (!clearTarget) return { subtotal: 0, gst: 0, total: 0 };
+    if (!clearTarget) return { subtotal: 0, serviceCharge: 0, gst: 0, total: 0 };
     if (clearTarget.type === "miscellaneous") {
-      return { subtotal: clearTarget.totalBill, gst: 0, total: clearTarget.totalBill };
+      return { subtotal: clearTarget.totalBill, serviceCharge: 0, gst: 0, total: clearTarget.totalBill };
     }
     if (clearTarget.type === "room") {
       const bill = calcRoomBill(
         clearTarget.nightlyRate,
         clearTarget.checkInAt,
         clearTarget.checkOutAt,
-        clearTarget.otherExtras,
+        clearTarget.otherExtras + (Number(clearServiceCharge) || 0),
         clampDiscountPercent(clearDiscountPercent),
         {
           ...taxOptionsFromStay(clearTarget),
@@ -287,7 +276,8 @@ export function InvoicesPage() {
         },
       );
       return {
-        subtotal: bill.roomChargesBefore + bill.extraCharges,
+        subtotal: bill.roomChargesBefore + bill.extraCharges - (Number(clearServiceCharge) || 0),
+        serviceCharge: Number(clearServiceCharge) || 0,
         gst: bill.taxAmount,
         total: bill.totalBill,
       };
@@ -295,8 +285,8 @@ export function InvoicesPage() {
     const subtotal = clearTarget.foodTotal;
     const pct = clearTaxRate?.percent ?? 0;
     const gst = pct > 0 ? roundMoney((subtotal * pct) / 100) : 0;
-    return { subtotal, gst, total: roundMoney(subtotal + gst) };
-  }, [clearTarget, clearTaxRate, clearDiscountPercent]);
+    return { subtotal, serviceCharge: 0, gst, total: roundMoney(subtotal + gst) };
+  }, [clearTarget, clearTaxRate, clearDiscountPercent, clearServiceCharge]);
 
   function openClearBill(inv: GuestInvoice) {
     setClearTarget(inv);
@@ -308,6 +298,7 @@ export function InvoicesPage() {
     setClearAccountNumber("");
     setClearTaxSelect("none");
     setClearDiscountPercent("");
+    setClearServiceCharge("");
     setClearBusy(false);
   }
 
@@ -334,6 +325,7 @@ export function InvoicesPage() {
             taxLabel: clearTaxRate?.name,
             taxRateId: clearTaxRate?.id ?? null,
             paymentMethod: clearPaymentMethod,
+            serviceCharge: Number(clearServiceCharge) || 0,
             cardDetails:
               clearPaymentMethod === "card"
                 ? { holderName: clearCardHolderName, cardNumber: clearCardNumber }
@@ -396,7 +388,7 @@ export function InvoicesPage() {
         setMiscRoomNumber("");
       }
     }
-    setMiscItems([{ name: "Laundry", qty: 1, unitPrice: 300 }]);
+    setMiscItems([]);
     setMiscPaymentTiming("due");
     setMiscPaymentMethod("cash");
     setMiscNotes("");
@@ -945,6 +937,24 @@ export function InvoicesPage() {
               </div>
             ) : null}
 
+            {clearTarget.type === "room" && clearNeedsPaymentDetails ? (
+              <div>
+                <label className="mb-2 block text-sm font-semibold">Service charges</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={clearServiceCharge}
+                  onChange={(e) => setClearServiceCharge(e.target.value)}
+                  placeholder="0"
+                  className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+                />
+                <p className="mt-2 text-xs text-muted">
+                  Optional charges for services added to this room bill. GST will apply according to the selected rate.
+                </p>
+              </div>
+            ) : null}
+
             {/* Preview */}
             <div className="rounded-xl border border-app bg-elevated p-4">
               <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted">
@@ -963,6 +973,14 @@ export function InvoicesPage() {
                     {formatRs(clearPreview.subtotal, t.common.rs)}
                   </span>
                 </div>
+                {clearPreview.serviceCharge > 0 ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted">Service charges</span>
+                    <span className="font-semibold">
+                      {formatRs(clearPreview.serviceCharge, t.common.rs)}
+                    </span>
+                  </div>
+                ) : null}
                 {clearPreview.gst > 0 ? (
                   <div className="flex justify-between">
                     <span className="text-muted">
@@ -1057,29 +1075,6 @@ export function InvoicesPage() {
                 placeholder="e.g. A1 or 102"
                 className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
               />
-            </div>
-          </div>
-
-          {/* Quick-add Presets */}
-          <div>
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted">
-                Quick Presets (Click to Add)
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {MISC_PRESETS.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  onClick={() => addMiscItem(preset.label, preset.defaultPrice)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-app bg-elevated px-2.5 py-1.5 text-xs font-medium hover:border-gold-500/50 hover:bg-gold-500/10 cursor-pointer transition-colors"
-                >
-                  <span>{preset.icon}</span>
-                  <span>{preset.label}</span>
-                  <span className="text-[11px] text-muted">({formatRs(preset.defaultPrice, t.common.rs)})</span>
-                </button>
-              ))}
             </div>
           </div>
 

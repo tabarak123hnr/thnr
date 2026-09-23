@@ -207,12 +207,13 @@ export const GuestInvoiceDocument = forwardRef<
           style={{
             width: "100%",
             borderCollapse: "collapse",
+            borderRight: `1px solid ${LINE}`,
             fontSize: 13,
           }}
         >
           <thead>
             <tr>
-              <th style={thLeft}>Description</th>
+              <th style={thLeft}>{isFood ? "Food Items" : "Description"}</th>
               <th style={thCenter}>Qty</th>
               <th style={thRight}>Price</th>
               <th style={thRight}>Total</th>
@@ -690,6 +691,7 @@ const partyLine: CSSProperties = {
 const thLeft: CSSProperties = {
   textAlign: "left",
   padding: "10px 6px",
+  borderLeft: `1px solid ${LINE}`,
   borderBottom: `1px solid ${RULE}`,
   borderTop: `1px solid ${RULE}`,
   fontSize: 10,
@@ -704,6 +706,7 @@ const thRight: CSSProperties = { ...thLeft, textAlign: "right" };
 
 const tdLeft: CSSProperties = {
   padding: "12px 6px",
+  borderLeft: `1px solid ${LINE}`,
   borderBottom: `1px solid ${LINE}`,
   verticalAlign: "top",
   color: INK,

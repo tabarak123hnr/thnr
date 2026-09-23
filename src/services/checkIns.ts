@@ -847,6 +847,7 @@ export async function clearRoomBill(
     taxRateId?: string | null;
     taxLabel?: string;
     paymentMethod?: PaymentMethod | null;
+    serviceCharge?: number;
     cardDetails?: CardPaymentDetails | null;
     onlineDetails?: OnlinePaymentDetails | null;
   },
@@ -879,7 +880,7 @@ export async function clearRoomBill(
   const roomExtraCharges = Math.max(
     0,
     (Number(data.extraCharges ?? 0) || 0) - foodSubtotal,
-  );
+  ) + Math.max(0, Number(options?.serviceCharge) || 0);
   const bill = calcRoomBill(
     Number(data.nightlyRate ?? 0),
     String(data.checkInAt ?? ""),
