@@ -1,10 +1,12 @@
 import { calcRoomBill, roundMoney, taxOptionsFromStay } from "./billing";
 import type { CheckInRecord, PaymentMethod, PaymentStatus, PaymentTiming } from "../types/checkIn";
 import { type FoodOrder } from "../types/order";
+import type { MiscBill } from "../types/miscBill";
 import {
   invoiceListStatus,
   type GuestInvoice,
   type InvoiceFoodLine,
+  type InvoiceMiscLine,
 } from "../types/invoice";
 
 function stampFrom(iso: string) {
@@ -306,18 +308,114 @@ export function buildFoodInvoice(
   };
 }
 
-/** One folio for the stay: room + food together (tax already split cleanly). */
+/** Miscellaneous folio — laundry, bedsheet, etc. strictly WITHOUT GST. */
+export function buildMiscInvoice(
+  bill: MiscBill,
+  checkIn?: CheckInRecord,
+): GuestInvoice {
+  const settled = checkIn ? isStaySettled(checkIn) : bill.paymentStatus === "paid";
+  const totalAmount = bill.totalAmount;
+  const amountPaid = settled || bill.paymentStatus === "paid" ? totalAmount : bill.amountPaid;
+  const split = paymentFromSplit(totalAmount, amountPaid);
+
+  const miscLines: InvoiceMiscLine[] = bill.items.map((it) => ({
+    billNumber: bill.billNumber,
+    name: it.name,
+    qty: it.qty,
+    unitPrice: it.unitPrice,
+    amount: it.amount,
+    paymentStatus: split.paymentStatus === "paid" ? "paid" : "due",
+  }));
+
+  let paymentTiming: PaymentTiming = "due_on_checkout";
+  if (split.balanceDue <= 0) paymentTiming = "paid_at_checkin";
+  else if (split.amountPaid > 0) paymentTiming = "partial";
+
+  return {
+    id: `${bill.id}-misc`,
+    checkInId: bill.checkInId,
+    number: bill.billNumber,
+    issuedAt: bill.createdAt,
+    guestName: bill.guestName || checkIn?.guestName || "Guest",
+    phone: checkIn?.phone || "",
+    email: checkIn?.email || "",
+    cnic: checkIn?.cnic || "",
+    nationality: checkIn?.nationality || "",
+    roomNumber: bill.roomNumber || checkIn?.roomNumber || "—",
+    checkInAt: checkIn?.checkInAt || bill.createdAt,
+    checkOutAt: checkIn?.checkedOutAt || checkIn?.checkOutAt || bill.createdAt,
+    nights: 0,
+    nightlyRate: 0,
+    discountedNightlyRate: 0,
+    discountPercent: 0,
+    discountAmount: 0,
+    roomChargesBefore: 0,
+    roomCharges: 0,
+    foodLines: [],
+    foodTotal: 0,
+    miscLines,
+    miscTotal: totalAmount,
+    miscPaid: split.amountPaid,
+    otherExtras: 0,
+    extraCharges: totalAmount,
+    taxLabel: "No GST",
+    taxPercent: 0,
+    taxAmount: 0,
+    roomTaxAmount: 0,
+    foodTaxAmount: 0,
+    taxAppliesToRoom: false,
+    taxAppliesToFood: false,
+    totalBill: totalAmount,
+    amountPaid: split.amountPaid,
+    balanceDue: split.balanceDue,
+    paymentStatus: split.paymentStatus,
+    paymentTiming,
+    stayStatus: checkIn?.status ?? "checked_in",
+    type: "miscellaneous",
+    notes: bill.notes || "",
+    adults: checkIn?.adults ?? 1,
+    children: checkIn?.children ?? 0,
+    paymentMethod: bill.paymentMethod ? formatPaymentMethodName(bill.paymentMethod) : null,
+  };
+}
+
+/** One folio for the stay: room + food + miscellaneous together (no GST on misc). */
 export function buildOverallInvoice(
   row: CheckInRecord,
   orders: FoodOrder[] = [],
+  miscBills: MiscBill[] = [],
 ): GuestInvoice {
   const room = buildRoomInvoice(row, orders);
   const food = buildFoodInvoice(row, orders);
   const foodTotal = food?.foodTotal ?? 0;
   const foodPaid = food?.amountPaid ?? 0;
+
+  // Miscellaneous charges for this stay (Exempt from GST)
+  const stayMiscBills = miscBills.filter((m) => m.checkInId === row.id);
+  const settled = isStaySettled(row);
+  const miscLines: InvoiceMiscLine[] = [];
+  for (const bill of stayMiscBills) {
+    const billPaid = settled || bill.paymentStatus === "paid";
+    for (const it of bill.items) {
+      miscLines.push({
+        billNumber: bill.billNumber,
+        name: it.name,
+        qty: it.qty,
+        unitPrice: it.unitPrice,
+        amount: it.amount,
+        paymentStatus: billPaid ? "paid" : "due",
+      });
+    }
+  }
+  const miscTotal = roundMoney(stayMiscBills.reduce((s, b) => s + b.totalAmount, 0));
+  const miscPaid = settled
+    ? miscTotal
+    : roundMoney(stayMiscBills.reduce((s, b) => s + (b.paymentStatus === "paid" ? b.totalAmount : b.amountPaid), 0));
+
+  // Taxes are ONLY from room and food. Miscellaneous is strictly 0% GST (tax-exempt).
   const taxAmount = roundMoney(room.taxAmount + (food?.taxAmount ?? 0));
-  const totalBill = Math.max(0, room.totalBill + (food?.totalBill ?? 0));
-  const amountPaid = Math.max(0, room.amountPaid + foodPaid);
+  const totalBill = Math.max(0, roundMoney(room.totalBill + (food?.totalBill ?? 0) + miscTotal));
+  const amountPaid = Math.max(0, roundMoney(room.amountPaid + foodPaid + miscPaid));
   const split = paymentFromSplit(totalBill, amountPaid);
 
   let paymentTiming: PaymentTiming = row.paymentTiming;
@@ -331,7 +429,10 @@ export function buildOverallInvoice(
     number: overallInvoiceNumber(row.id, row.roomNumber, row.checkInAt),
     foodLines: food?.foodLines ?? [],
     foodTotal,
-    extraCharges: room.otherExtras + foodTotal,
+    miscLines,
+    miscTotal,
+    miscPaid,
+    extraCharges: room.otherExtras + foodTotal + miscTotal,
     taxAmount,
     roomTaxAmount: room.roomTaxAmount,
     foodTaxAmount: food?.foodTaxAmount ?? 0,
@@ -348,39 +449,53 @@ export function buildOverallInvoice(
 }
 
 /**
- * Builds separate room and food invoices (never a combined folio).
+ * Builds separate room, food, and miscellaneous invoices.
  * Food invoice is omitted when the stay has no restaurant orders.
- * Settled checkouts treat room + food as paid (even if order flags lag).
+ * Settled checkouts treat bills as paid.
  */
 export function buildGuestInvoices(
   checkIns: CheckInRecord[],
   orders: FoodOrder[],
+  miscBills: MiscBill[] = [],
 ): GuestInvoice[] {
   const out: GuestInvoice[] = [];
+  const checkInMap = new Map<string, CheckInRecord>();
   for (const row of checkIns) {
     if (row.status === "cancelled") continue;
+    checkInMap.set(row.id, row);
     out.push(buildRoomInvoice(row, orders));
     const food = buildFoodInvoice(row, orders);
     if (food) out.push(food);
+  }
+  for (const bill of miscBills) {
+    const parentCheckIn = checkInMap.get(bill.checkInId);
+    out.push(buildMiscInvoice(bill, parentCheckIn));
   }
   return out.sort((a, b) => {
     const ta = new Date(a.checkInAt).getTime();
     const tb = new Date(b.checkInAt).getTime();
     const byDate = (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
     if (byDate !== 0) return byDate;
-    if (a.type !== b.type) return a.type === "room" ? -1 : 1;
+    if (a.type !== b.type) {
+      if (a.type === "room") return -1;
+      if (b.type === "room") return 1;
+      if (a.type === "restaurant") return -1;
+      if (b.type === "restaurant") return 1;
+      return 0;
+    }
     return a.number.localeCompare(b.number);
   });
 }
 
-/** One combined invoice per stay (room + food). */
+/** One combined invoice per stay (room + food + misc). */
 export function buildOverallInvoices(
   checkIns: CheckInRecord[],
   orders: FoodOrder[],
+  miscBills: MiscBill[] = [],
 ): GuestInvoice[] {
   return checkIns
     .filter((row) => row.status !== "cancelled")
-    .map((row) => buildOverallInvoice(row, orders))
+    .map((row) => buildOverallInvoice(row, orders, miscBills))
     .sort((a, b) => {
       const ta = new Date(a.checkInAt).getTime();
       const tb = new Date(b.checkInAt).getTime();
@@ -389,3 +504,4 @@ export function buildOverallInvoices(
 }
 
 export { invoiceListStatus };
+

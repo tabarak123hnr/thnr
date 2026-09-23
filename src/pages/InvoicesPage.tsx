@@ -1,4 +1,17 @@
-import { Banknote, CreditCard, Download, Eye, Globe, Printer, RefreshCw, CheckCircle } from "lucide-react";
+import {
+  Banknote,
+  CreditCard,
+  Download,
+  Eye,
+  Globe,
+  Printer,
+  RefreshCw,
+  CheckCircle,
+  Plus,
+  Trash2,
+  Sparkles,
+  Receipt,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GuestInvoiceDocument } from "../components/invoice/GuestInvoiceDocument";
 import { Badge } from "../components/ui/Badge";
@@ -24,6 +37,13 @@ import {
 } from "../services/checkIns";
 import { clearGuestFoodBill, fetchOrders, subscribeOrders, type FoodOrder } from "../services/orders";
 import { subscribeTaxRates, type TaxRate } from "../services/taxRates";
+import {
+  fetchMiscBills,
+  subscribeMiscBills,
+  createMiscBill,
+  clearMiscBill,
+} from "../services/miscBills";
+import type { MiscBill } from "../types/miscBill";
 import type { GuestInvoice, InvoiceListStatus, InvoiceType } from "../types/invoice";
 
 const hotelName =
@@ -56,12 +76,14 @@ function formatDate(iso: string) {
 function typeLabel(type: InvoiceType) {
   if (type === "restaurant") return "Food";
   if (type === "overall") return "Overall";
+  if (type === "miscellaneous") return "Misc";
   return "Room";
 }
 
-function typeTone(type: InvoiceType): "gold" | "info" | "purple" {
+function typeTone(type: InvoiceType): "gold" | "info" | "purple" | "warning" {
   if (type === "restaurant") return "info";
   if (type === "overall") return "purple";
+  if (type === "miscellaneous") return "warning";
   return "gold";
 }
 
@@ -74,12 +96,23 @@ function paymentMethodTone(method: string | null | undefined): "success" | "info
   return "default";
 }
 
+const MISC_PRESETS = [
+  { label: "Laundry", icon: "🧺", defaultPrice: 300 },
+  { label: "Bedsheet", icon: "🛏️", defaultPrice: 500 },
+  { label: "Ironing", icon: "👔", defaultPrice: 150 },
+  { label: "Dry Cleaning", icon: "🧼", defaultPrice: 600 },
+  { label: "Extra Towels", icon: "🧻", defaultPrice: 200 },
+  { label: "Room Cleaning", icon: "🧹", defaultPrice: 400 },
+  { label: "Car Wash", icon: "🚗", defaultPrice: 500 },
+];
+
 export function InvoicesPage() {
   const { t } = useApp();
   const { success: toastSuccess, error: toastError } = useToast();
 
   const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
   const [orders, setOrders] = useState<FoodOrder[]>([]);
+  const [miscBills, setMiscBills] = useState<MiscBill[]>([]);
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [statusFilter, setStatusFilter] = useState<"all" | InvoiceListStatus>("all");
   const [typeFilter, setTypeFilter] = useState<InvoiceType>("overall");
@@ -90,9 +123,27 @@ export function InvoicesPage() {
   /* ── Clear Bill modal state ── */
   const [clearTarget, setClearTarget] = useState<GuestInvoice | null>(null);
   const [clearPaymentMethod, setClearPaymentMethod] = useState<PaymentMethod>("cash");
+  const [clearCardHolderName, setClearCardHolderName] = useState("");
+  const [clearCardNumber, setClearCardNumber] = useState("");
+  const [clearBankName, setClearBankName] = useState("");
+  const [clearAccountName, setClearAccountName] = useState("");
+  const [clearAccountNumber, setClearAccountNumber] = useState("");
   const [clearTaxSelect, setClearTaxSelect] = useState("none");
   const [clearDiscountPercent, setClearDiscountPercent] = useState("");
   const [clearBusy, setClearBusy] = useState(false);
+
+  /* ── Add Miscellaneous modal state ── */
+  const [miscModalOpen, setMiscModalOpen] = useState(false);
+  const [miscStayId, setMiscStayId] = useState("");
+  const [miscGuestName, setMiscGuestName] = useState("");
+  const [miscRoomNumber, setMiscRoomNumber] = useState("");
+  const [miscItems, setMiscItems] = useState<{ name: string; qty: number; unitPrice: number }[]>([
+    { name: "Laundry", qty: 1, unitPrice: 300 },
+  ]);
+  const [miscPaymentTiming, setMiscPaymentTiming] = useState<"due" | "paid">("due");
+  const [miscPaymentMethod, setMiscPaymentMethod] = useState<PaymentMethod>("cash");
+  const [miscNotes, setMiscNotes] = useState("");
+  const [miscBusy, setMiscBusy] = useState(false);
 
   const sheetRef = useRef<HTMLDivElement>(null);
 
@@ -100,21 +151,23 @@ export function InvoicesPage() {
     const a = subscribeCheckIns(setCheckIns);
     const b = subscribeOrders(setOrders);
     const c = subscribeTaxRates(setTaxRates);
+    const d = subscribeMiscBills(setMiscBills);
     return () => {
       a();
       b();
       c();
+      d();
     };
   }, []);
 
   const splitInvoices = useMemo(
-    () => buildGuestInvoices(checkIns, orders),
-    [checkIns, orders],
+    () => buildGuestInvoices(checkIns, orders, miscBills),
+    [checkIns, orders, miscBills],
   );
 
   const overallInvoices = useMemo(
-    () => buildOverallInvoices(checkIns, orders),
-    [checkIns, orders],
+    () => buildOverallInvoices(checkIns, orders, miscBills),
+    [checkIns, orders, miscBills],
   );
 
   const invoices = typeFilter === "overall" ? overallInvoices : splitInvoices;
@@ -136,6 +189,7 @@ export function InvoicesPage() {
   const stats = useMemo(() => {
     const room = splitInvoices.filter((i) => i.type === "room");
     const food = splitInvoices.filter((i) => i.type === "restaurant");
+    const misc = splitInvoices.filter((i) => i.type === "miscellaneous");
     let collected = 0;
     let openBalance = 0;
     let unpaidCount = 0;
@@ -148,6 +202,7 @@ export function InvoicesPage() {
     return {
       roomCount: room.length,
       foodCount: food.length,
+      miscCount: misc.length,
       overallCount: overallInvoices.length,
       collected,
       openBalance,
@@ -159,12 +214,14 @@ export function InvoicesPage() {
   async function onRefresh() {
     setRefreshing(true);
     try {
-      const [nextCheckIns, nextOrders] = await Promise.all([
+      const [nextCheckIns, nextOrders, nextMisc] = await Promise.all([
         fetchCheckIns(),
         fetchOrders(),
+        fetchMiscBills(),
       ]);
       setCheckIns(nextCheckIns);
       setOrders(nextOrders);
+      setMiscBills(nextMisc);
       toastSuccess("Refreshed", "Invoices updated from the latest records.");
     } catch (err) {
       toastError(
@@ -202,7 +259,9 @@ export function InvoicesPage() {
   );
 
   const clearNeedsPaymentDetails =
-    clearTarget?.type === "restaurant" || clearTarget?.paymentTiming === "due_on_checkout";
+    clearTarget?.type === "restaurant" ||
+    clearTarget?.type === "miscellaneous" ||
+    clearTarget?.paymentTiming === "due_on_checkout";
 
   const clearTaxRate = useMemo(() => {
     if (clearTaxSelect === "none") return null;
@@ -211,6 +270,9 @@ export function InvoicesPage() {
 
   const clearPreview = useMemo(() => {
     if (!clearTarget) return { subtotal: 0, gst: 0, total: 0 };
+    if (clearTarget.type === "miscellaneous") {
+      return { subtotal: clearTarget.totalBill, gst: 0, total: clearTarget.totalBill };
+    }
     if (clearTarget.type === "room") {
       const bill = calcRoomBill(
         clearTarget.nightlyRate,
@@ -239,6 +301,11 @@ export function InvoicesPage() {
   function openClearBill(inv: GuestInvoice) {
     setClearTarget(inv);
     setClearPaymentMethod("cash");
+    setClearCardHolderName("");
+    setClearCardNumber("");
+    setClearBankName("");
+    setClearAccountName("");
+    setClearAccountNumber("");
     setClearTaxSelect("none");
     setClearDiscountPercent("");
     setClearBusy(false);
@@ -248,6 +315,18 @@ export function InvoicesPage() {
     if (!clearTarget) return;
     setClearBusy(true);
     try {
+      if (clearTarget.type === "miscellaneous") {
+        const rawId = clearTarget.id.replace(/-misc$/, "");
+        const settled = await clearMiscBill(rawId, {
+          paymentMethod: clearPaymentMethod,
+        });
+        toastSuccess(
+          "Miscellaneous bill cleared",
+          `${settled.guestName} · Room ${settled.roomNumber} — ${formatRs(settled.totalAmount, t.common.rs)} settled`,
+        );
+        setClearTarget(null);
+        return;
+      }
       const result = clearTarget.type === "room"
         ? await clearRoomBill(clearTarget.checkInId, clearNeedsPaymentDetails ? {
             discountPercent: clampDiscountPercent(clearDiscountPercent),
@@ -255,6 +334,18 @@ export function InvoicesPage() {
             taxLabel: clearTaxRate?.name,
             taxRateId: clearTaxRate?.id ?? null,
             paymentMethod: clearPaymentMethod,
+            cardDetails:
+              clearPaymentMethod === "card"
+                ? { holderName: clearCardHolderName, cardNumber: clearCardNumber }
+                : null,
+            onlineDetails:
+              clearPaymentMethod === "online"
+                ? {
+                    bankName: clearBankName,
+                    accountName: clearAccountName,
+                    accountNumber: clearAccountNumber,
+                  }
+                : null,
           } : undefined)
         : await clearGuestFoodBill(clearTarget.checkInId, {
             taxPercent: clearTaxRate?.percent ?? 0,
@@ -271,10 +362,123 @@ export function InvoicesPage() {
     } catch (err) {
       toastError(
         "Clear bill failed",
-        err instanceof Error ? err.message : "Could not settle this food bill.",
+        err instanceof Error ? err.message : "Could not settle this bill.",
       );
     } finally {
       setClearBusy(false);
+    }
+  }
+
+  /* ── Add Miscellaneous helpers ── */
+  const activeStays = useMemo(() => {
+    return checkIns
+      .filter((c) => c.status === "checked_in")
+      .map((c) => ({
+        value: c.id,
+        label: `Room ${c.roomNumber} — ${c.guestName} (${c.phone || "In house"})`,
+      }));
+  }, [checkIns]);
+
+  function openNewMiscModal(presetStay?: { checkInId: string; guestName: string; roomNumber: string }) {
+    if (presetStay) {
+      setMiscStayId(presetStay.checkInId);
+      setMiscGuestName(presetStay.guestName);
+      setMiscRoomNumber(presetStay.roomNumber);
+    } else {
+      const firstActive = checkIns.find((c) => c.status === "checked_in");
+      if (firstActive) {
+        setMiscStayId(firstActive.id);
+        setMiscGuestName(firstActive.guestName);
+        setMiscRoomNumber(firstActive.roomNumber);
+      } else {
+        setMiscStayId("");
+        setMiscGuestName("");
+        setMiscRoomNumber("");
+      }
+    }
+    setMiscItems([{ name: "Laundry", qty: 1, unitPrice: 300 }]);
+    setMiscPaymentTiming("due");
+    setMiscPaymentMethod("cash");
+    setMiscNotes("");
+    setMiscBusy(false);
+    setMiscModalOpen(true);
+  }
+
+  function handleSelectStay(checkInId: string) {
+    setMiscStayId(checkInId);
+    const found = checkIns.find((c) => c.id === checkInId);
+    if (found) {
+      setMiscGuestName(found.guestName);
+      setMiscRoomNumber(found.roomNumber);
+    }
+  }
+
+  function addMiscItem(name = "", defaultPrice = 0) {
+    setMiscItems((prev) => {
+      if (prev.length === 1 && !prev[0].name.trim() && !prev[0].unitPrice) {
+        return [{ name, qty: 1, unitPrice: defaultPrice }];
+      }
+      return [...prev, { name, qty: 1, unitPrice: defaultPrice }];
+    });
+  }
+
+  function updateMiscItem(index: number, patch: Partial<{ name: string; qty: number; unitPrice: number }>) {
+    setMiscItems((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, ...patch } : item)),
+    );
+  }
+
+  function removeMiscItem(index: number) {
+    setMiscItems((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+  }
+
+  const miscSubtotal = useMemo(() => {
+    return roundMoney(
+      miscItems.reduce((acc, it) => acc + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0),
+    );
+  }, [miscItems]);
+
+  async function onSaveMiscBill() {
+    if (!miscGuestName.trim() || !miscRoomNumber.trim()) {
+      toastError("Missing guest info", "Please enter guest name and room number.");
+      return;
+    }
+    const valid = miscItems.filter((it) => it.name.trim() && Number(it.unitPrice) > 0);
+    if (!valid.length) {
+      toastError("No items added", "Add at least one item with a description and price greater than 0.");
+      return;
+    }
+
+    setMiscBusy(true);
+    try {
+      const selectedStay = checkIns.find((c) => c.id === miscStayId);
+      const bill = await createMiscBill({
+        checkInId: miscStayId || "",
+        roomId: selectedStay?.roomId,
+        roomNumber: miscRoomNumber.trim(),
+        guestName: miscGuestName.trim(),
+        items: valid.map((it) => ({
+          name: it.name.trim(),
+          qty: Math.max(1, Number(it.qty) || 1),
+          unitPrice: Math.max(0, Number(it.unitPrice) || 0),
+        })),
+        paymentStatus: miscPaymentTiming,
+        paymentMethod: miscPaymentTiming === "paid" ? miscPaymentMethod : null,
+        notes: miscNotes.trim(),
+      });
+
+      toastSuccess(
+        "Miscellaneous bill added",
+        `${bill.billNumber} · Room ${bill.roomNumber} — ${formatRs(bill.totalAmount, t.common.rs)}`,
+      );
+      setMiscModalOpen(false);
+    } catch (err) {
+      toastError(
+        "Failed to create bill",
+        err instanceof Error ? err.message : "Could not create miscellaneous bill.",
+      );
+    } finally {
+      setMiscBusy(false);
     }
   }
 
@@ -344,6 +548,14 @@ export function InvoicesPage() {
         actions={
           <>
             <Button
+              variant="gold"
+              className="w-full cursor-pointer sm:w-auto"
+              icon={<Plus className="h-4 w-4" />}
+              onClick={() => openNewMiscModal()}
+            >
+              Add Miscellaneous
+            </Button>
+            <Button
               variant="secondary"
               className="w-full cursor-pointer sm:w-auto"
               icon={
@@ -368,10 +580,11 @@ export function InvoicesPage() {
         }
       />
 
-      <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <StatCard label="Overall invoices" value={String(stats.overallCount)} />
         <StatCard label="Room invoices" value={String(stats.roomCount)} />
         <StatCard label="Food invoices" value={String(stats.foodCount)} />
+        <StatCard label="Misc invoices" value={String(stats.miscCount)} />
         <StatCard
           label="Collected"
           value={formatRs(stats.collected, t.common.rs)}
@@ -390,6 +603,7 @@ export function InvoicesPage() {
             ["overall", "Overall"],
             ["room", "Room"],
             ["restaurant", "Food"],
+            ["miscellaneous", "Miscellaneous"],
           ] as const
         ).map(([value, label]) => (
           <Button
@@ -487,6 +701,23 @@ export function InvoicesPage() {
                       >
                         Open
                       </Button>
+                      {inv.type === "overall" ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="cursor-pointer whitespace-nowrap text-xs"
+                          icon={<Plus className="h-3.5 w-3.5" />}
+                          onClick={() =>
+                            openNewMiscModal({
+                              checkInId: inv.checkInId,
+                              guestName: inv.guestName,
+                              roomNumber: inv.roomNumber,
+                            })
+                          }
+                        >
+                          + Misc
+                        </Button>
+                      ) : null}
                       {inv.type !== "overall" && status !== "paid" ? (
                         <Button
                           size="sm"
@@ -555,11 +786,17 @@ export function InvoicesPage() {
         ) : null}
       </Modal>
 
-      {/* ── Clear Food Bill Modal ── */}
+      {/* ── Clear Bill Modal ── */}
       <Modal
         open={Boolean(clearTarget)}
         onClose={() => !clearBusy && setClearTarget(null)}
-        title={clearTarget?.type === "room" ? "Clear Room Bill" : "Clear Food Bill"}
+        title={
+          clearTarget?.type === "room"
+            ? "Clear Room Bill"
+            : clearTarget?.type === "miscellaneous"
+              ? "Clear Miscellaneous Bill"
+              : "Clear Food Bill"
+        }
         subtitle={
           clearTarget
             ? `${clearTarget.guestName} · Room ${clearTarget.roomNumber}`
@@ -632,7 +869,64 @@ export function InvoicesPage() {
             </div>
             ) : null}
 
-            {clearNeedsPaymentDetails ? (
+            {clearTarget.type === "room" && clearNeedsPaymentDetails && clearPaymentMethod === "card" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold">Cardholder name (optional)</label>
+                  <input
+                    value={clearCardHolderName}
+                    onChange={(e) => setClearCardHolderName(e.target.value)}
+                    placeholder="Name on card"
+                    className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-semibold">Card number (optional)</label>
+                  <input
+                    value={clearCardNumber}
+                    onChange={(e) => setClearCardNumber(e.target.value)}
+                    placeholder="Card number"
+                    inputMode="numeric"
+                    className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {clearTarget.type === "room" && clearNeedsPaymentDetails && clearPaymentMethod === "online" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold">Bank name (optional)</label>
+                  <input
+                    value={clearBankName}
+                    onChange={(e) => setClearBankName(e.target.value)}
+                    placeholder="Bank name"
+                    className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-semibold">Guest account name (optional)</label>
+                  <input
+                    value={clearAccountName}
+                    onChange={(e) => setClearAccountName(e.target.value)}
+                    placeholder="Account holder name"
+                    className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="mb-2 block text-sm font-semibold">Guest account number (optional)</label>
+                  <input
+                    value={clearAccountNumber}
+                    onChange={(e) => setClearAccountNumber(e.target.value)}
+                    placeholder="Account number"
+                    inputMode="numeric"
+                    className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {clearNeedsPaymentDetails && clearTarget.type !== "miscellaneous" ? (
             <div>
               <label className="mb-2 block text-sm font-semibold">GST / Tax Rate</label>
               <FancySelect
@@ -645,6 +939,10 @@ export function InvoicesPage() {
                 Choose No GST to keep this bill tax-free, or pick a GST rate to add tax before clearing it.
               </p>
             </div>
+            ) : clearTarget.type === "miscellaneous" ? (
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-300">
+                ✓ Miscellaneous charges are tax-exempt (0% GST). No tax will be added.
+              </div>
             ) : null}
 
             {/* Preview */}
@@ -655,7 +953,11 @@ export function InvoicesPage() {
               <div className="space-y-1.5 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted">
-                    {clearTarget.type === "room" ? "Room subtotal" : "Food subtotal"}
+                    {clearTarget.type === "room"
+                      ? "Room subtotal"
+                      : clearTarget.type === "miscellaneous"
+                        ? "Miscellaneous subtotal"
+                        : "Food subtotal"}
                   </span>
                   <span className="font-semibold">
                     {formatRs(clearPreview.subtotal, t.common.rs)}
@@ -670,7 +972,12 @@ export function InvoicesPage() {
                       {formatRs(clearPreview.gst, t.common.rs)}
                     </span>
                   </div>
-                ) : null}
+                ) : (
+                  <div className="flex justify-between text-muted text-xs">
+                    <span>GST (0% Exempt)</span>
+                    <span>{formatRs(0, t.common.rs)}</span>
+                  </div>
+                )}
                 <div className="mt-2 flex justify-between border-t border-app pt-2 text-base font-extrabold">
                   <span>Total to collect</span>
                   <span>{formatRs(clearPreview.total, t.common.rs)}</span>
@@ -679,6 +986,286 @@ export function InvoicesPage() {
             </div>
           </div>
         ) : null}
+      </Modal>
+
+      {/* ── Add Miscellaneous Bill Modal ── */}
+      <Modal
+        open={miscModalOpen}
+        onClose={() => !miscBusy && setMiscModalOpen(false)}
+        title="Add Miscellaneous Bill"
+        subtitle="Add laundry, bedsheet, or other guest services (tax-free / 0% GST)"
+        wide
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              disabled={miscBusy}
+              onClick={() => setMiscModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="gold"
+              className="cursor-pointer font-semibold"
+              icon={<Receipt className="h-4 w-4" />}
+              disabled={miscBusy}
+              onClick={() => void onSaveMiscBill()}
+            >
+              {miscBusy ? "Saving…" : "Save Miscellaneous Bill"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          {/* Guest / Stay Selection */}
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted">
+              Select Guest Stay (In-house)
+            </label>
+            {activeStays.length > 0 ? (
+              <FancySelect
+                value={miscStayId}
+                onChange={handleSelectStay}
+                options={[
+                  { value: "", label: "— Select Active Stay or Enter Manually —" },
+                  ...activeStays,
+                ]}
+                placeholder="Choose guest / room…"
+              />
+            ) : (
+              <p className="text-xs text-muted">No active in-house stays found. You can fill in the guest and room below.</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-muted">Guest Name *</label>
+              <input
+                type="text"
+                value={miscGuestName}
+                onChange={(e) => setMiscGuestName(e.target.value)}
+                placeholder="e.g. Mughees"
+                className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-muted">Room Number *</label>
+              <input
+                type="text"
+                value={miscRoomNumber}
+                onChange={(e) => setMiscRoomNumber(e.target.value)}
+                placeholder="e.g. A1 or 102"
+                className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+
+          {/* Quick-add Presets */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+                Quick Presets (Click to Add)
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {MISC_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => addMiscItem(preset.label, preset.defaultPrice)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-app bg-elevated px-2.5 py-1.5 text-xs font-medium hover:border-gold-500/50 hover:bg-gold-500/10 cursor-pointer transition-colors"
+                >
+                  <span>{preset.icon}</span>
+                  <span>{preset.label}</span>
+                  <span className="text-[11px] text-muted">({formatRs(preset.defaultPrice, t.common.rs)})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Line items editor */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+                Bill Items ({miscItems.length})
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                icon={<Plus className="h-3.5 w-3.5" />}
+                onClick={() => addMiscItem("", 0)}
+              >
+                Add Item
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              {miscItems.map((item, index) => {
+                const lineTotal = roundMoney((Number(item.qty) || 0) * (Number(item.unitPrice) || 0));
+                return (
+                  <div
+                    key={index}
+                    className="flex flex-wrap items-center gap-2 rounded-xl border border-app bg-elevated p-2.5"
+                  >
+                    <div className="flex-1 min-w-[160px]">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => updateMiscItem(index, { name: e.target.value })}
+                        placeholder="Item name (e.g. Laundry, Bedsheet)"
+                        className="w-full rounded-lg border border-app bg-app px-2.5 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div className="w-20">
+                      <input
+                        type="number"
+                        min="1"
+                        value={item.qty}
+                        onChange={(e) => updateMiscItem(index, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                        placeholder="Qty"
+                        className="w-full rounded-lg border border-app bg-app px-2.5 py-1.5 text-sm text-center"
+                      />
+                    </div>
+                    <div className="w-28">
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted font-semibold">
+                          Rs
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="10"
+                          value={item.unitPrice || ""}
+                          onChange={(e) => updateMiscItem(index, { unitPrice: Math.max(0, Number(e.target.value) || 0) })}
+                          placeholder="Price"
+                          className="w-full rounded-lg border border-app bg-app pl-8 pr-2 py-1.5 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="w-24 text-right font-semibold text-sm">
+                      {formatRs(lineTotal, t.common.rs)}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={miscItems.length <= 1}
+                      onClick={() => removeMiscItem(index)}
+                      className="cursor-pointer p-1.5 text-muted hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title="Remove item"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Payment & Tax Option */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted">
+                Payment Timing
+              </label>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant={miscPaymentTiming === "due" ? "gold" : "secondary"}
+                  className="flex-1 cursor-pointer"
+                  onClick={() => setMiscPaymentTiming("due")}
+                >
+                  Charge to Stay (Due)
+                </Button>
+                <Button
+                  size="sm"
+                  variant={miscPaymentTiming === "paid" ? "gold" : "secondary"}
+                  className="flex-1 cursor-pointer"
+                  onClick={() => setMiscPaymentTiming("paid")}
+                >
+                  Paid Now
+                </Button>
+              </div>
+            </div>
+
+            {miscPaymentTiming === "paid" ? (
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted">
+                  Payment Method
+                </label>
+                <div className="flex gap-2">
+                  {(
+                    [
+                      ["cash", "Cash", <Banknote key="b" className="h-4 w-4" />],
+                      ["card", "Card", <CreditCard key="c" className="h-4 w-4" />],
+                      ["online", "Online", <Globe key="o" className="h-4 w-4" />],
+                    ] as const
+                  ).map(([method, label, icon]) => (
+                    <Button
+                      key={method}
+                      size="sm"
+                      variant={miscPaymentMethod === method ? "gold" : "secondary"}
+                      className="cursor-pointer flex-1"
+                      icon={icon}
+                      onClick={() => setMiscPaymentMethod(method)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted">
+                  Billing note
+                </label>
+                <p className="text-xs text-muted pt-1">
+                  This charge will be added to the guest's stay bill and collected at checkout.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Tax Information Banner */}
+          <div className="flex items-center justify-between rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-300">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 shrink-0" />
+              <span>
+                <strong>0% GST Exempt:</strong> Miscellaneous services are not subject to GST and will not increase guest tax.
+              </span>
+            </div>
+            <Badge tone="success">No GST</Badge>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-muted">Notes / Remarks (Optional)</label>
+            <input
+              type="text"
+              value={miscNotes}
+              onChange={(e) => setMiscNotes(e.target.value)}
+              placeholder="e.g. Picked up by Room Service at 3 PM"
+              className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+            />
+          </div>
+
+          {/* Summary Preview */}
+          <div className="rounded-xl border border-app bg-elevated p-4">
+            <div className="space-y-1.5 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted">Subtotal ({miscItems.length} items)</span>
+                <span className="font-semibold">{formatRs(miscSubtotal, t.common.rs)}</span>
+              </div>
+              <div className="flex justify-between text-muted text-xs">
+                <span>GST (0% Exempt)</span>
+                <span>{formatRs(0, t.common.rs)}</span>
+              </div>
+              <div className="mt-2 flex justify-between border-t border-app pt-2 text-base font-extrabold">
+                <span>Total Miscellaneous Bill</span>
+                <span className="text-accent">{formatRs(miscSubtotal, t.common.rs)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </Modal>
     </div>
   );

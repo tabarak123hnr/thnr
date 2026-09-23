@@ -44,9 +44,11 @@ export const GuestInvoiceDocument = forwardRef<
   { invoice: GuestInvoice; hotelName: string; rs?: string }
 >(function GuestInvoiceDocument({ invoice, hotelName, rs = "Rs" }, ref) {
   const isFood = invoice.type === "restaurant";
+  const isMisc = invoice.type === "miscellaneous";
   const isOverall = invoice.type === "overall";
   const showRoom = invoice.type === "room" || isOverall;
   const showFood = isFood || isOverall;
+  const showMisc = isMisc || isOverall;
   const status = invoiceListStatus(invoice);
   const statusLabel =
     status === "paid" ? "Paid" : status === "partial" ? "Partial" : "Due";
@@ -85,7 +87,9 @@ export const GuestInvoiceDocument = forwardRef<
                 ? "Overall invoice"
                 : isFood
                   ? "Restaurant invoice"
-                  : "Room invoice"}
+                  : isMisc
+                    ? "Miscellaneous invoice"
+                    : "Room invoice"}
             </p>
             <h1
               style={{
@@ -103,10 +107,12 @@ export const GuestInvoiceDocument = forwardRef<
               Tabarak Hotel &amp; Restaurant
               <br />
               {isOverall
-                ? "Combined room and food bill for this stay"
+                ? "Combined room, food, and miscellaneous bill for this stay"
                 : isFood
                   ? "Food / room service bill (separate from room folio)"
-                  : "Accommodation folio (separate from food bills)"}
+                  : isMisc
+                    ? "Miscellaneous bill (laundry, bedsheet, etc. - exempt from GST)"
+                    : "Accommodation folio (separate from food bills)"}
             </p>
           </div>
 
@@ -165,16 +171,18 @@ export const GuestInvoiceDocument = forwardRef<
             ) : null}
           </div>
           <div>
-            <p style={sectionLabel}>{isFood ? "Service to" : "Stay details"}</p>
+            <p style={sectionLabel}>{isFood ? "Service to" : isMisc ? "Charged to" : "Stay details"}</p>
             <p style={partyName}>Room {invoice.roomNumber}</p>
             <p style={partyLine}>Check-in · {fmtDateTime(invoice.checkInAt)}</p>
             <p style={partyLine}>Check-out · {fmtDateTime(invoice.checkOutAt)}</p>
-            {!isFood ? (
+            {!isFood && !isMisc ? (
               <p style={partyLine}>
                 {invoice.nights} night{invoice.nights === 1 ? "" : "s"} · {invoice.adults}{" "}
                 adult{invoice.adults === 1 ? "" : "s"}
                 {invoice.children > 0 ? ` · ${invoice.children} child(ren)` : ""}
               </p>
+            ) : isMisc ? (
+              <p style={partyLine}>Miscellaneous charges for this stay (exempt from GST)</p>
             ) : (
               <p style={partyLine}>Room service / restaurant charges for this stay</p>
             )}
@@ -263,7 +271,7 @@ export const GuestInvoiceDocument = forwardRef<
                 ) : null}
                 {invoice.otherExtras > 0 ? (
                   <tr>
-                    <td style={tdLeft}>Extras / miscellaneous</td>
+                    <td style={tdLeft}>Extras</td>
                     <td style={tdCenter}>1</td>
                     <td style={tdRight}>{fmtMoney(invoice.otherExtras, rs)}</td>
                     <td style={{ ...tdRight, fontWeight: 700 }}>
@@ -280,6 +288,21 @@ export const GuestInvoiceDocument = forwardRef<
                       {line.name}
                       <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
                         {line.orderToken} · {line.paymentStatus === "paid" ? "Paid" : "Due"}
+                      </span>
+                    </td>
+                    <td style={tdCenter}>{line.qty}</td>
+                    <td style={tdRight}>{fmtMoney(line.unitPrice, rs)}</td>
+                    <td style={{ ...tdRight, fontWeight: 700 }}>{fmtMoney(line.amount, rs)}</td>
+                  </tr>
+                ))
+              : null}
+            {showMisc && invoice.miscLines?.length
+              ? invoice.miscLines.map((line, i) => (
+                  <tr key={`${line.billNumber}-${line.name}-${i}`}>
+                    <td style={tdLeft}>
+                      {line.name}
+                      <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
+                        {line.billNumber} · Miscellaneous · {line.paymentStatus === "paid" ? "Paid" : "Due"} · 0% GST (Exempt)
                       </span>
                     </td>
                     <td style={tdCenter}>{line.qty}</td>
@@ -316,7 +339,7 @@ export const GuestInvoiceDocument = forwardRef<
         >
           {isOverall ? (
             <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: invoice.miscTotal && invoice.miscTotal > 0 ? "repeat(auto-fit, minmax(180px, 1fr))" : "1fr 1fr", gap: 20 }}>
               <div style={summaryPanel}>
                 <p style={summaryHeading}>Room breakdown</p>
                 <div style={totalRow}>
@@ -359,6 +382,23 @@ export const GuestInvoiceDocument = forwardRef<
                   <span>{fmtMoney(invoice.foodTotal + invoice.foodTaxAmount, rs)}</span>
                 </div>
               </div>
+              {invoice.miscTotal && invoice.miscTotal > 0 ? (
+                <div style={summaryPanel}>
+                  <p style={summaryHeading}>Miscellaneous (No GST)</p>
+                  <div style={totalRow}>
+                    <span style={{ color: MUTED }}>Misc subtotal</span>
+                    <span>{fmtMoney(invoice.miscTotal, rs)}</span>
+                  </div>
+                  <div style={totalRow}>
+                    <span style={{ color: MUTED }}>GST (0% Exempt)</span>
+                    <span>{fmtMoney(0, rs)}</span>
+                  </div>
+                  <div style={{ ...totalRow, marginTop: 8, borderTop: `1px solid ${LINE}`, paddingTop: 10, fontWeight: 700 }}>
+                    <span style={{ color: MUTED }}>Misc total</span>
+                    <span>{fmtMoney(invoice.miscTotal, rs)}</span>
+                  </div>
+                </div>
+              ) : null}
             </div>
             <div style={{ marginTop: 24, paddingTop: 18, borderTop: `1px solid ${LINE}` }}>
               <p style={summaryHeading}>Settlement</p>
@@ -394,7 +434,19 @@ export const GuestInvoiceDocument = forwardRef<
             </>
           ) : (
           <div style={{ width: 280, marginLeft: "auto" }}>
-            {showRoom ? (
+            {isMisc ? (
+              <>
+                <div style={totalRow}>
+                  <span style={{ color: MUTED }}>Misc subtotal</span>
+                  <span>{fmtMoney(invoice.miscTotal || invoice.totalBill, rs)}</span>
+                </div>
+                <div style={totalRow}>
+                  <span style={{ color: MUTED }}>GST (0% / Exempt)</span>
+                  <span>{fmtMoney(0, rs)}</span>
+                </div>
+              </>
+            ) : null}
+            {showRoom && !isMisc ? (
               <>
                 <div style={totalRow}>
                   <span style={{ color: MUTED }}>Room subtotal</span>
@@ -430,13 +482,13 @@ export const GuestInvoiceDocument = forwardRef<
                 ) : null}
               </>
             ) : null}
-            {showFood && invoice.foodTotal > 0 ? (
+            {showFood && !isMisc && invoice.foodTotal > 0 ? (
               <div style={totalRow}>
                 <span style={{ color: MUTED }}>Food</span>
                 <span>{fmtMoney(invoice.foodTotal, rs)}</span>
               </div>
             ) : null}
-            {invoice.taxAmount > 0 && (showFood || (showRoom && showFood)) ? (
+            {invoice.taxAmount > 0 && (showFood || (showRoom && showFood)) && !isMisc ? (
               <div style={totalRow}>
                 <span style={{ color: MUTED }}>
                   {invoice.taxLabel || "GST"} ({invoice.taxPercent}%)
@@ -578,7 +630,9 @@ export const GuestInvoiceDocument = forwardRef<
         >
           {isFood
             ? "Thank you for dining with us"
-            : "Thank you for staying with us"} ·{" "}
+            : isMisc
+              ? "Thank you for choosing our services"
+              : "Thank you for staying with us"} ·{" "}
           {hotelName}
         </p>
       </div>

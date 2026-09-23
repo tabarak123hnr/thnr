@@ -165,6 +165,15 @@ type CompanionForm = {
   cnic: string;
   phone: string;
   relation: string;
+  photoFile: File | null;
+  photoPreview: string | null;
+  photoUrl: string | null;
+  cnicFrontFile: File | null;
+  cnicFrontPreview: string | null;
+  cnicFrontImageUrl: string | null;
+  cnicBackFile: File | null;
+  cnicBackPreview: string | null;
+  cnicBackImageUrl: string | null;
 };
 
 const emptyCompanion = (): CompanionForm => ({
@@ -172,6 +181,15 @@ const emptyCompanion = (): CompanionForm => ({
   cnic: "",
   phone: "",
   relation: "",
+  photoFile: null,
+  photoPreview: null,
+  photoUrl: null,
+  cnicFrontFile: null,
+  cnicFrontPreview: null,
+  cnicFrontImageUrl: null,
+  cnicBackFile: null,
+  cnicBackPreview: null,
+  cnicBackImageUrl: null,
 });
 
 function emptyForm() {
@@ -355,6 +373,7 @@ export function CheckInPage() {
   const navigate = useNavigate();
   const cnicFrontRef = useRef<HTMLInputElement>(null);
   const cnicBackRef = useRef<HTMLInputElement>(null);
+  const guestPhotoRef = useRef<HTMLInputElement>(null);
 
   const staffDisplayName =
     profile?.name || user?.displayName || user?.email?.split("@")[0] || "";
@@ -383,6 +402,9 @@ export function CheckInPage() {
   const [companions, setCompanions] = useState<CompanionForm[]>([]);
   const [cnicFrontFile, setCnicFrontFile] = useState<File | null>(null);
   const [cnicBackFile, setCnicBackFile] = useState<File | null>(null);
+  const [guestPhotoFile, setGuestPhotoFile] = useState<File | null>(null);
+  const [guestPhotoPreview, setGuestPhotoPreview] = useState<string | null>(null);
+  const [existingGuestPhotoUrl, setExistingGuestPhotoUrl] = useState<string | null>(null);
   const [cnicFrontPreview, setCnicFrontPreview] = useState<string | null>(null);
   const [cnicBackPreview, setCnicBackPreview] = useState<string | null>(null);
   const [existingCnicFrontUrl, setExistingCnicFrontUrl] = useState<string | null>(null);
@@ -417,8 +439,9 @@ export function CheckInPage() {
     return () => {
       if (cnicFrontPreview) URL.revokeObjectURL(cnicFrontPreview);
       if (cnicBackPreview) URL.revokeObjectURL(cnicBackPreview);
+      if (guestPhotoPreview) URL.revokeObjectURL(guestPhotoPreview);
     };
-  }, [cnicFrontPreview, cnicBackPreview]);
+  }, [cnicFrontPreview, cnicBackPreview, guestPhotoPreview]);
 
   const availableRooms = useMemo(
     () =>
@@ -527,10 +550,14 @@ export function CheckInPage() {
   function resetMedia() {
     if (cnicFrontPreview) URL.revokeObjectURL(cnicFrontPreview);
     if (cnicBackPreview) URL.revokeObjectURL(cnicBackPreview);
+    if (guestPhotoPreview) URL.revokeObjectURL(guestPhotoPreview);
     setCnicFrontFile(null);
     setCnicBackFile(null);
+    setGuestPhotoFile(null);
+    setGuestPhotoPreview(null);
     setCnicFrontPreview(null);
     setCnicBackPreview(null);
+    setExistingGuestPhotoUrl(null);
     setExistingCnicFrontUrl(null);
     setExistingCnicBackUrl(null);
   }
@@ -641,6 +668,15 @@ export function CheckInPage() {
         cnic: c.cnic || "",
         phone: c.phone || "",
         relation: c.relation || "",
+        photoFile: null,
+        photoPreview: null,
+        photoUrl: c.photoUrl || null,
+        cnicFrontFile: null,
+        cnicFrontPreview: null,
+        cnicFrontImageUrl: c.cnicFrontImageUrl || null,
+        cnicBackFile: null,
+        cnicBackPreview: null,
+        cnicBackImageUrl: c.cnicBackImageUrl || null,
       })),
     );
     setNightlyRate(row.nightlyRate || rooms.find((r) => r.id === row.roomId)?.rate || 0);
@@ -660,6 +696,7 @@ export function CheckInPage() {
     setFormPaymentMethod(row.checkInPaymentMethod ?? "");
     setExistingCnicFrontUrl(row.cnicFrontImageUrl || row.cnicImageUrl);
     setExistingCnicBackUrl(row.cnicBackImageUrl);
+    setExistingGuestPhotoUrl(row.guestPhotoUrl);
     setFormError(null);
     setEditingId(row.id);
     setLockedRoomId(row.roomId);
@@ -822,6 +859,35 @@ export function CheckInPage() {
     }
   }
 
+  function onPickGuestPhoto(file: File | null) {
+    if (guestPhotoPreview) URL.revokeObjectURL(guestPhotoPreview);
+    setGuestPhotoFile(file);
+    setGuestPhotoPreview(file ? URL.createObjectURL(file) : null);
+  }
+
+  function onPickCompanionImage(
+    index: number,
+    field: "photo" | "cnicFront" | "cnicBack",
+    file: File | null,
+  ) {
+    setCompanions((prev) =>
+      prev.map((companion, currentIndex) => {
+        if (currentIndex !== index) return companion;
+        const previewKey = `${field}Preview` as "photoPreview" | "cnicFrontPreview" | "cnicBackPreview";
+        const fileKey = `${field}File` as "photoFile" | "cnicFrontFile" | "cnicBackFile";
+        const urlKey =
+          field === "photo" ? "photoUrl" : field === "cnicFront" ? "cnicFrontImageUrl" : "cnicBackImageUrl";
+        if (companion[previewKey]) URL.revokeObjectURL(companion[previewKey]);
+        return {
+          ...companion,
+          [fileKey]: file,
+          [previewKey]: file ? URL.createObjectURL(file) : null,
+          ...(file ? {} : { [urlKey]: null }),
+        };
+      }),
+    );
+  }
+
   function addCompanion() {
     setCompanions((prev) => [...prev, emptyCompanion()]);
   }
@@ -905,6 +971,10 @@ export function CheckInPage() {
     try {
       let cnicFrontUrl: string | null | undefined = existingCnicFrontUrl;
       let cnicBackUrl: string | null | undefined = existingCnicBackUrl;
+      let guestPhotoUrl: string | null | undefined = existingGuestPhotoUrl;
+      if (guestPhotoFile) {
+        guestPhotoUrl = await uploadImageToCloudinary(guestPhotoFile, "tabarak/checkins");
+      }
       if (cnicFrontFile) {
         cnicFrontUrl = await uploadImageToCloudinary(cnicFrontFile, "tabarak/checkins");
       }
@@ -914,12 +984,28 @@ export function CheckInPage() {
 
       const companionPayload: CheckInCompanion[] =
         adults + children > 1
-          ? companions.map((c) => ({
-              name: c.name,
-              cnic: c.cnic || undefined,
-              phone: c.phone || undefined,
-              relation: c.relation || undefined,
-            }))
+          ? await Promise.all(
+              companions.map(async (c) => {
+                const photoUrl = c.photoFile
+                  ? await uploadImageToCloudinary(c.photoFile, "tabarak/checkins/family")
+                  : c.photoUrl || undefined;
+                const cnicFrontImageUrl = c.cnicFrontFile
+                  ? await uploadImageToCloudinary(c.cnicFrontFile, "tabarak/checkins/family")
+                  : c.cnicFrontImageUrl || undefined;
+                const cnicBackImageUrl = c.cnicBackFile
+                  ? await uploadImageToCloudinary(c.cnicBackFile, "tabarak/checkins/family")
+                  : c.cnicBackImageUrl || undefined;
+                return {
+                  name: c.name,
+                  cnic: c.cnic || undefined,
+                  phone: c.phone || undefined,
+                  relation: c.relation || undefined,
+                  photoUrl,
+                  cnicFrontImageUrl,
+                  cnicBackImageUrl,
+                };
+              }),
+            )
           : [];
 
       const paidNow =
@@ -953,6 +1039,7 @@ export function CheckInPage() {
           cnicFrontImageUrl: cnicFrontUrl ?? null,
           cnicBackImageUrl: cnicBackUrl ?? null,
           cnicImageUrl: cnicFrontUrl ?? null,
+          guestPhotoUrl: guestPhotoUrl ?? null,
           paymentTiming: form.paymentTiming,
           amountPaidAtCheckIn: paidNow,
           taxRateId: liveBill.taxRateId,
@@ -982,6 +1069,7 @@ export function CheckInPage() {
           cnicImageUrl: cnicFrontUrl ?? null,
           cnicFrontImageUrl: cnicFrontUrl ?? null,
           cnicBackImageUrl: cnicBackUrl ?? null,
+          guestPhotoUrl: guestPhotoUrl ?? null,
           notes: form.notes,
           checkedInBy: form.checkedInBy,
           vehicleColor: form.vehicleColor,
@@ -1840,6 +1928,35 @@ export function CheckInPage() {
                           placeholder="Spouse, child…"
                         />
                       </Field>
+                      <div className="grid gap-2 sm:col-span-4 sm:grid-cols-3">
+                        {([
+                          ["photo", "Photo", c.photoPreview || c.photoUrl],
+                          ["cnicFront", "CNIC front", c.cnicFrontPreview || c.cnicFrontImageUrl],
+                          ["cnicBack", "CNIC back", c.cnicBackPreview || c.cnicBackImageUrl],
+                        ] as const).map(([field, label, preview]) => {
+                          const inputId = `companion-${index}-${field}`;
+                          return (
+                            <div key={field}>
+                              <input
+                                id={inputId}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  onPickCompanionImage(index, field, e.target.files?.[0] ?? null);
+                                  e.target.value = "";
+                                }}
+                              />
+                              <CnicUploadSlot
+                                label={`${label} (optional)`}
+                                preview={preview || null}
+                                onPick={() => document.getElementById(inputId)?.click()}
+                                onClear={() => onPickCompanionImage(index, field, null)}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
                       <div className="flex items-end">
                         <Button
                           type="button"
@@ -1868,6 +1985,16 @@ export function CheckInPage() {
               </div>
             </div>
             <input
+              ref={guestPhotoRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                onPickGuestPhoto(e.target.files?.[0] ?? null);
+                e.target.value = "";
+              }}
+            />
+            <input
               ref={cnicFrontRef}
               type="file"
               accept="image/*"
@@ -1887,7 +2014,16 @@ export function CheckInPage() {
                 e.target.value = "";
               }}
             />
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <CnicUploadSlot
+                label="Guest photo"
+                preview={guestPhotoPreview || existingGuestPhotoUrl}
+                onPick={() => guestPhotoRef.current?.click()}
+                onClear={() => {
+                  onPickGuestPhoto(null);
+                  setExistingGuestPhotoUrl(null);
+                }}
+              />
               <CnicUploadSlot
                 label="Front side"
                 preview={cnicFrontPreview || existingCnicFrontUrl}

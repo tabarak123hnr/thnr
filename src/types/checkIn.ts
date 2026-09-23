@@ -11,6 +11,17 @@ export type PaymentTiming = "paid_at_checkin" | "due_on_checkout" | "partial";
 /** How the guest paid (check-in collection or checkout settlement). */
 export type PaymentMethod = "cash" | "card" | "online";
 
+export interface CardPaymentDetails {
+  holderName?: string;
+  cardNumber?: string;
+}
+
+export interface OnlinePaymentDetails {
+  bankName?: string;
+  accountName?: string;
+  accountNumber?: string;
+}
+
 /** Settled result across the stay */
 export type PaymentStatus = "paid" | "due" | "pending" | "partial";
 
@@ -19,6 +30,9 @@ export interface CheckInCompanion {
   cnic?: string;
   phone?: string;
   relation?: string;
+  photoUrl?: string;
+  cnicFrontImageUrl?: string;
+  cnicBackImageUrl?: string;
 }
 
 export interface CheckInRecord {
@@ -37,6 +51,7 @@ export interface CheckInRecord {
   checkOutAt: string;
   /** Original planned departure — kept when guest leaves early */
   plannedCheckOutAt: string;
+  guestPhotoUrl: string | null;
   cnicImageUrl: string | null;
   /** CNIC front / back images (cnicImageUrl kept as front for older records) */
   cnicFrontImageUrl: string | null;
@@ -62,6 +77,8 @@ export interface CheckInRecord {
   checkoutPaymentMethod: PaymentMethod | null;
   /** Method used when the room folio itself was cleared from Invoices. */
   roomBillPaymentMethod: PaymentMethod | null;
+  roomBillCardDetails: CardPaymentDetails | null;
+  roomBillOnlineDetails: OnlinePaymentDetails | null;
   roomBillClearedAt: string | null;
   /** Snapshot of room rate at check-in / last update (before discount) */
   nightlyRate: number;

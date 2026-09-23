@@ -24,6 +24,8 @@ import type {
   CheckInCompanion,
   CheckInRecord,
   CheckInStatus,
+  CardPaymentDetails,
+  OnlinePaymentDetails,
   PaymentMethod,
   PaymentStatus,
   PaymentTiming,
@@ -31,9 +33,11 @@ import type {
 import { resolvePaymentSplit } from "../types/checkIn";
 
 export type {
+  CardPaymentDetails,
   CheckInCompanion,
   CheckInRecord,
   CheckInStatus,
+  OnlinePaymentDetails,
   PaymentMethod,
   PaymentStatus,
   PaymentTiming,
@@ -47,6 +51,17 @@ function parsePaymentMethod(value: unknown): PaymentMethod | null {
   return null;
 }
 
+function parsePaymentDetails(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== "object") return null;
+  const details = value as Record<string, unknown>;
+  const parsed = Object.fromEntries(
+    Object.entries(details)
+      .map(([key, item]) => [key, String(item ?? "").trim()])
+      .filter(([, item]) => item),
+  );
+  return Object.keys(parsed).length ? parsed : null;
+}
+
 function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
   const companions = Array.isArray(data.companions)
     ? (data.companions as CheckInCompanion[]).map((c) => ({
@@ -54,6 +69,9 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
         cnic: c.cnic ? String(c.cnic) : undefined,
         phone: c.phone ? String(c.phone) : undefined,
         relation: c.relation ? String(c.relation) : undefined,
+        photoUrl: c.photoUrl ? String(c.photoUrl) : undefined,
+        cnicFrontImageUrl: c.cnicFrontImageUrl ? String(c.cnicFrontImageUrl) : undefined,
+        cnicBackImageUrl: c.cnicBackImageUrl ? String(c.cnicBackImageUrl) : undefined,
       }))
     : [];
 
@@ -111,6 +129,7 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
     checkInAt,
     checkOutAt,
     email: String(data.email ?? ""),
+    guestPhotoUrl: data.guestPhotoUrl ? String(data.guestPhotoUrl) : null,
     cnicImageUrl: data.cnicImageUrl
       ? String(data.cnicImageUrl)
       : data.cnicFrontImageUrl
@@ -137,6 +156,8 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
     checkInPaymentMethod: parsePaymentMethod(data.checkInPaymentMethod),
     checkoutPaymentMethod: parsePaymentMethod(data.checkoutPaymentMethod),
     roomBillPaymentMethod: parsePaymentMethod(data.roomBillPaymentMethod),
+    roomBillCardDetails: parsePaymentDetails(data.roomBillCardDetails) as CardPaymentDetails | null,
+    roomBillOnlineDetails: parsePaymentDetails(data.roomBillOnlineDetails) as OnlinePaymentDetails | null,
     roomBillClearedAt: data.roomBillClearedAt ? String(data.roomBillClearedAt) : null,
     nightlyRate: computed?.nightlyRate ?? nightlyRate,
     discountPercent: Number(data.discountPercent ?? computed?.discountPercent ?? discountPercent),
@@ -228,6 +249,7 @@ export async function createCheckIn(input: {
   cnicImageUrl: string | null;
   cnicFrontImageUrl?: string | null;
   cnicBackImageUrl?: string | null;
+  guestPhotoUrl?: string | null;
   email?: string;
   notes: string;
   checkedInBy?: string;
@@ -296,6 +318,7 @@ export async function createCheckIn(input: {
     checkInAt: input.checkInAt,
     checkOutAt: input.checkOutAt,
     plannedCheckOutAt: input.checkOutAt,
+    guestPhotoUrl: input.guestPhotoUrl ?? null,
     cnicImageUrl: cnicFront,
     cnicFrontImageUrl: cnicFront,
     cnicBackImageUrl: cnicBack,
@@ -391,6 +414,7 @@ export async function updateCheckIn(
     cnicImageUrl?: string | null;
     cnicFrontImageUrl?: string | null;
     cnicBackImageUrl?: string | null;
+    guestPhotoUrl?: string | null;
     email?: string;
     checkedInBy?: string;
     vehicleColor?: string;
@@ -461,6 +485,7 @@ export async function updateCheckIn(
     phone: input.phone.trim(),
     email,
     cnic: input.cnic.trim(),
+    ...(input.guestPhotoUrl !== undefined ? { guestPhotoUrl: input.guestPhotoUrl } : {}),
     nationality: input.nationality.trim() || "Pakistan",
     purpose: input.purpose,
     adults: input.adults,
@@ -776,6 +801,27 @@ export async function checkoutGuest(
       // Best-effort — stay is already settled
     }
 
+    // Settle miscellaneous bills billed to this stay
+    try {
+      const miscSnap = await getDocs(query(collection(db, "miscBills"), where("checkInId", "==", id)));
+      for (const mDoc of miscSnap.docs) {
+        const mData = mDoc.data();
+        if (mData.paymentStatus !== "paid") {
+          const tot = Number(mData.totalAmount) || Number(mData.subtotal) || 0;
+          await updateDoc(doc(db, "miscBills", mDoc.id), {
+            paymentStatus: "paid",
+            amountPaid: tot,
+            balanceDue: 0,
+            paymentMethod: options?.checkoutPaymentMethod || data.checkoutPaymentMethod || "cash",
+            clearedAt: actualOut,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+    } catch {
+      // Best-effort
+    }
+
     return {
       nights: bill.nights,
       totalBill: bill.totalBill,
@@ -801,6 +847,8 @@ export async function clearRoomBill(
     taxRateId?: string | null;
     taxLabel?: string;
     paymentMethod?: PaymentMethod | null;
+    cardDetails?: CardPaymentDetails | null;
+    onlineDetails?: OnlinePaymentDetails | null;
   },
 ) {
   if (!auth.currentUser) throw new Error("You must be signed in to clear a room bill.");
@@ -865,6 +913,12 @@ export async function clearRoomBill(
     roomBillPaymentMethod: roomAlreadyPartial
       ? (data.roomBillPaymentMethod ?? null)
       : (options?.paymentMethod ?? null),
+    roomBillCardDetails: roomAlreadyPartial
+      ? (data.roomBillCardDetails ?? null)
+      : (options?.cardDetails ?? null),
+    roomBillOnlineDetails: roomAlreadyPartial
+      ? (data.roomBillOnlineDetails ?? null)
+      : (options?.onlineDetails ?? null),
     roomBillClearedAt: new Date().toISOString(),
     updatedAt: serverTimestamp(),
   });

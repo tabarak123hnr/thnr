@@ -26,6 +26,8 @@ import {
   subscribeOrders,
   type FoodOrder,
 } from "../services/orders";
+import { subscribeMiscBills } from "../services/miscBills";
+import type { MiscBill } from "../types/miscBill";
 
 function normalize(value: string) {
   return value.trim().toLowerCase().replace(/[\s\-_/]/g, "");
@@ -135,6 +137,7 @@ export function ReportsPage() {
   const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
   const [orders, setOrders] = useState<FoodOrder[]>([]);
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
+  const [miscBills, setMiscBills] = useState<MiscBill[]>([]);
   const [query, setQuery] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<"pdf" | "csv" | null>(null);
@@ -143,10 +146,12 @@ export function ReportsPage() {
     const a = subscribeCheckIns(setCheckIns);
     const b = subscribeOrders(setOrders);
     const c = subscribeBookingRequests(setBookings);
+    const d = subscribeMiscBills(setMiscBills);
     return () => {
       a();
       b();
       c();
+      d();
     };
   }, []);
 
@@ -310,8 +315,8 @@ export function ReportsPage() {
   const selectedInvoices = useMemo(() => {
     if (!selected) return [];
     // Raw orders are fine — invoiceBuild settles food when the stay is paid out
-    return buildGuestInvoices(selected.stays, orders);
-  }, [selected, orders]);
+    return buildGuestInvoices(selected.stays, orders, miscBills);
+  }, [selected, orders, miscBills]);
 
   const latestStay = selected?.stays[0] ?? null;
 

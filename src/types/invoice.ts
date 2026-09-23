@@ -2,8 +2,8 @@ import type { CheckInRecord, PaymentStatus, PaymentTiming } from "./checkIn";
 
 export type InvoiceListStatus = "paid" | "unpaid" | "partial";
 
-/** Room, food, or one combined folio for the stay. */
-export type InvoiceType = "room" | "restaurant" | "overall";
+/** Room, food, miscellaneous, or one combined folio for the stay. */
+export type InvoiceType = "room" | "restaurant" | "overall" | "miscellaneous";
 
 export interface InvoiceFoodLine {
   orderToken: string;
@@ -17,8 +17,17 @@ export interface InvoiceFoodLine {
   paymentStatus: "paid" | "due";
 }
 
+export interface InvoiceMiscLine {
+  billNumber: string;
+  name: string;
+  qty: number;
+  unitPrice: number;
+  amount: number;
+  paymentStatus: "paid" | "due";
+}
+
 export interface GuestInvoice {
-  /** Unique folio id: `{checkInId}-room`, `{checkInId}-food`, or `{checkInId}-overall` */
+  /** Unique folio id: `{checkInId}-room`, `{checkInId}-food`, `{checkInId}-overall`, or `{billId}-misc` */
   id: string;
   /** Parent stay id */
   checkInId: string;
@@ -41,6 +50,9 @@ export interface GuestInvoice {
   roomCharges: number;
   foodLines: InvoiceFoodLine[];
   foodTotal: number;
+  miscLines?: InvoiceMiscLine[];
+  miscTotal?: number;
+  miscPaid?: number;
   otherExtras: number;
   extraCharges: number;
   taxLabel: string;

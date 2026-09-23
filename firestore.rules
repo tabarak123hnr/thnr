@@ -130,6 +130,11 @@ service cloud.firestore {
       allow delete: if signedIn();
     }
 
+    // Miscellaneous bills — laundry, bedsheet, amenities
+    match /miscBills/{billId} {
+      allow read, create, update, delete: if signedIn();
+    }
+
     // Menu catalog (when Menu page writes to Firestore)
     match /menuItems/{itemId} {
       allow read: if signedIn();
