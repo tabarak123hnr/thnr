@@ -283,9 +283,12 @@ export function InvoicesPage() {
       };
     }
     const subtotal = clearTarget.foodTotal;
+    const serviceCharge = clearTarget.type === "restaurant"
+      ? Math.max(0, Number(clearServiceCharge) || 0)
+      : 0;
     const pct = clearTaxRate?.percent ?? 0;
-    const gst = pct > 0 ? roundMoney((subtotal * pct) / 100) : 0;
-    return { subtotal, serviceCharge: 0, gst, total: roundMoney(subtotal + gst) };
+    const gst = pct > 0 ? roundMoney(((subtotal + serviceCharge) * pct) / 100) : 0;
+    return { subtotal, serviceCharge, gst, total: roundMoney(subtotal + serviceCharge + gst) };
   }, [clearTarget, clearTaxRate, clearDiscountPercent, clearServiceCharge]);
 
   function openClearBill(inv: GuestInvoice) {
@@ -344,6 +347,7 @@ export function InvoicesPage() {
             taxLabel: clearTaxRate?.name,
             taxRateId: clearTaxRate?.id ?? null,
             paymentMethod: clearPaymentMethod,
+            serviceCharge: Number(clearServiceCharge) || 0,
           });
       const settledTotal = "totalBill" in result ? result.totalBill : result.folioTotal;
       toastSuccess(
@@ -710,7 +714,8 @@ export function InvoicesPage() {
                           + Misc
                         </Button>
                       ) : null}
-                      {inv.type !== "overall" && status !== "paid" ? (
+                      {inv.type !== "overall" &&
+                      (status !== "paid" || (inv.type === "restaurant" && !inv.billClearedAt)) ? (
                         <Button
                           size="sm"
                           className="cursor-pointer whitespace-nowrap !bg-emerald-600 !text-white hover:!bg-emerald-500 shadow-xs"
@@ -937,7 +942,7 @@ export function InvoicesPage() {
               </div>
             ) : null}
 
-            {clearTarget.type === "room" && clearNeedsPaymentDetails ? (
+            {(clearTarget.type === "room" || clearTarget.type === "restaurant") && clearNeedsPaymentDetails ? (
               <div>
                 <label className="mb-2 block text-sm font-semibold">Service charges</label>
                 <input
@@ -950,7 +955,7 @@ export function InvoicesPage() {
                   className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
                 />
                 <p className="mt-2 text-xs text-muted">
-                  Optional charges for services added to this room bill. GST will apply according to the selected rate.
+                  Optional charges for services added to this bill. GST will apply according to the selected rate.
                 </p>
               </div>
             ) : null}

@@ -329,6 +329,7 @@ export async function clearGuestFoodBill(
     taxLabel?: string;
     taxRateId?: string | null;
     paymentMethod: PaymentMethod;
+    serviceCharge?: number;
   },
 ) {
   if (!auth.currentUser) throw new Error("You must be signed in.");
@@ -352,9 +353,11 @@ export async function clearGuestFoodBill(
   const foodSubtotal = roundMoney(orders.reduce((s, o) => s + (o.amount || 0), 0));
   if (foodSubtotal <= 0) throw new Error("Food total is zero.");
 
+  const serviceCharge = Math.max(0, Number(input.serviceCharge) || 0);
+  const taxableSubtotal = roundMoney(foodSubtotal + serviceCharge);
   const pct = Math.max(0, Math.min(100, Number(input.taxPercent) || 0));
-  const foodTax = pct > 0 ? roundMoney((foodSubtotal * pct) / 100) : 0;
-  const folioTotal = roundMoney(foodSubtotal + foodTax);
+  const foodTax = pct > 0 ? roundMoney((taxableSubtotal * pct) / 100) : 0;
+  const folioTotal = roundMoney(taxableSubtotal + foodTax);
 
   const paidPretax = roundMoney(
     orders
@@ -389,6 +392,7 @@ export async function clearGuestFoodBill(
     foodTaxPercent: pct,
     foodTaxLabel: taxLabel,
     foodTaxRateId: input.taxRateId ?? null,
+    foodServiceCharge: serviceCharge,
     foodBillPaymentMethod: input.paymentMethod,
     foodBillClearedAt: clearedAt,
     updatedAt: serverTimestamp(),
@@ -396,6 +400,7 @@ export async function clearGuestFoodBill(
 
   return {
     foodSubtotal,
+    serviceCharge,
     foodTax,
     folioTotal,
     collected: balanceToCollect,

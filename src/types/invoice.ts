@@ -60,6 +60,8 @@ export interface GuestInvoice {
   taxAmount: number;
   roomTaxAmount: number;
   foodTaxAmount: number;
+  foodServiceCharge?: number;
+  billClearedAt?: string | null;
   taxAppliesToRoom: boolean;
   taxAppliesToFood: boolean;
   totalBill: number;

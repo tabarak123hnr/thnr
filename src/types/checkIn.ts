@@ -101,6 +101,7 @@ export interface CheckInRecord {
   foodTaxLabel: string;
   foodTaxRateId: string | null;
   foodBillPaymentMethod: PaymentMethod | null;
+  foodServiceCharge: number;
   foodBillClearedAt: string | null;
   totalBill: number;
   checkedOutAt?: string | null;

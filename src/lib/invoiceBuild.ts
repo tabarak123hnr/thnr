@@ -255,8 +255,12 @@ export function buildFoodInvoice(
   const foodTotal = foodLines.reduce((s, l) => s + l.amount, 0);
   if (foodTotal <= 0) return null;
 
-  const { taxAmount, taxPercent, taxLabel: foodTaxLabel } = foodGstForStay(row, foodTotal);
-  const folioTotal = roundMoney(foodTotal + taxAmount);
+  const foodServiceCharge = Math.max(0, Number(row.foodServiceCharge) || 0);
+  const { taxAmount, taxPercent, taxLabel: foodTaxLabel } = foodGstForStay(
+    row,
+    foodTotal + foodServiceCharge,
+  );
+  const folioTotal = roundMoney(foodTotal + foodServiceCharge + taxAmount);
 
   const foodCleared = Boolean(row.foodBillClearedAt);
   const foodPaidPretax = settled
@@ -293,6 +297,7 @@ export function buildFoodInvoice(
     roomCharges: 0,
     foodLines,
     foodTotal,
+    foodServiceCharge,
     otherExtras: 0,
     extraCharges: foodTotal,
     taxAmount,
@@ -304,6 +309,7 @@ export function buildFoodInvoice(
     paymentStatus: split.paymentStatus,
     paymentTiming,
     paymentMethod: resolveFoodPaymentMethod(row, settled),
+    billClearedAt: row.foodBillClearedAt,
     type: "restaurant",
   };
 }
