@@ -202,339 +202,365 @@ export const GuestInvoiceDocument = forwardRef<
           {paymentPlanLabel(invoice.paymentTiming)}
         </p>
 
-        {/* Line items */}
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            borderRight: `1px solid ${LINE}`,
-            fontSize: 13,
-          }}
-        >
-          <thead>
-            <tr>
-              <th style={thLeft}>{isFood ? "Food Items" : "Description"}</th>
-              <th style={thCenter}>Qty</th>
-              <th style={thRight}>Price</th>
-              <th style={thRight}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {showRoom ? (
-              <>
-                <tr>
-                  <td style={tdLeft}>
-                    Room {invoice.roomNumber} — accommodation
-                    <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
-                      {invoice.nights} night{invoice.nights === 1 ? "" : "s"} @{" "}
-                      {fmtMoney(invoice.nightlyRate, rs)}
-                      {invoice.discountPercent > 0
-                        ? ` · ${invoice.discountPercent}% off`
-                        : ""}
-                    </span>
-                  </td>
-                  <td style={tdCenter}>{invoice.nights}</td>
-                  <td style={tdRight}>{fmtMoney(invoice.nightlyRate, rs)}</td>
-                  <td style={{ ...tdRight, fontWeight: 700 }}>
-                    {fmtMoney(invoice.roomChargesBefore || invoice.roomCharges, rs)}
-                  </td>
-                </tr>
-                {invoice.taxAmount > 0 && !showFood ? (
-                  <tr>
-                    <td style={tdLeft}>
-                      {invoice.taxLabel || "GST"}
-                      <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
-                        {invoice.taxPercent}% sales tax
-                      </span>
-                    </td>
-                    <td style={tdCenter}>1</td>
-                    <td style={tdRight}>{fmtMoney(invoice.taxAmount, rs)}</td>
-                    <td style={{ ...tdRight, fontWeight: 700 }}>
-                      {fmtMoney(invoice.taxAmount, rs)}
-                    </td>
-                  </tr>
-                ) : null}
-                {invoice.discountPercent > 0 && invoice.discountAmount > 0 ? (
-                  <tr>
-                    <td style={tdLeft}>
-                      Discount
-                      <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
-                        {invoice.discountPercent}% off room (after GST) ·{" "}
-                        {fmtMoney(invoice.discountedNightlyRate, rs)} / night
-                      </span>
-                    </td>
-                    <td style={tdCenter}>1</td>
-                    <td style={tdRight}>−{fmtMoney(invoice.discountAmount, rs)}</td>
-                    <td style={{ ...tdRight, fontWeight: 700 }}>
-                      −{fmtMoney(invoice.discountAmount, rs)}
-                    </td>
-                  </tr>
-                ) : null}
-                {invoice.otherExtras > 0 ? (
-                  <tr>
-                    <td style={tdLeft}>Extras</td>
-                    <td style={tdCenter}>1</td>
-                    <td style={tdRight}>{fmtMoney(invoice.otherExtras, rs)}</td>
-                    <td style={{ ...tdRight, fontWeight: 700 }}>
-                      {fmtMoney(invoice.otherExtras, rs)}
-                    </td>
-                  </tr>
-                ) : null}
-              </>
-            ) : null}
-            {showFood
-              ? invoice.foodLines.map((line, i) => (
-                  <tr key={`${line.orderToken}-${i}`}>
-                    <td style={tdLeft}>
-                      {line.name}
-                      <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
-                        {line.orderToken} · {line.paymentStatus === "paid" ? "Paid" : "Due"}
-                      </span>
-                    </td>
-                    <td style={tdCenter}>{line.qty}</td>
-                    <td style={tdRight}>{fmtMoney(line.unitPrice, rs)}</td>
-                    <td style={{ ...tdRight, fontWeight: 700 }}>{fmtMoney(line.amount, rs)}</td>
-                  </tr>
-                ))
-              : null}
-            {showMisc && invoice.miscLines?.length
-              ? invoice.miscLines.map((line, i) => (
-                  <tr key={`${line.billNumber}-${line.name}-${i}`}>
-                    <td style={tdLeft}>
-                      {line.name}
-                      <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
-                        {line.billNumber} · Miscellaneous · {line.paymentStatus === "paid" ? "Paid" : "Due"} · 0% GST (Exempt)
-                      </span>
-                    </td>
-                    <td style={tdCenter}>{line.qty}</td>
-                    <td style={tdRight}>{fmtMoney(line.unitPrice, rs)}</td>
-                    <td style={{ ...tdRight, fontWeight: 700 }}>{fmtMoney(line.amount, rs)}</td>
-                  </tr>
-                ))
-              : null}
-            {!showRoom && showFood && invoice.taxAmount > 0 ? (
-              <tr>
-                <td style={tdLeft}>
-                  {invoice.taxLabel || "GST"}
-                  <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
-                    {invoice.taxPercent}% sales tax on food
-                  </span>
-                </td>
-                <td style={tdCenter}>1</td>
-                <td style={tdRight}>{fmtMoney(invoice.taxAmount, rs)}</td>
-                <td style={{ ...tdRight, fontWeight: 700 }}>
-                  {fmtMoney(invoice.taxAmount, rs)}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        {/* Summary items calculation */}
+        {(() => {
+          const summaryRows: { label: string; value: string }[] = [];
 
-        {/* Totals */}
-        <div
-          style={{
-            marginTop: 8,
-            borderTop: `1px solid ${RULE}`,
-            paddingTop: 16,
-          }}
-        >
-          {isOverall ? (
-            <>
-            <div style={{ display: "grid", gridTemplateColumns: invoice.miscTotal && invoice.miscTotal > 0 ? "repeat(auto-fit, minmax(180px, 1fr))" : "1fr 1fr", gap: 20 }}>
-              <div style={summaryPanel}>
-                <p style={summaryHeading}>Room breakdown</p>
-                <div style={totalRow}>
-                  <span style={{ color: MUTED }}>Room subtotal</span>
-                  <span>{fmtMoney(invoice.roomChargesBefore || invoice.roomCharges, rs)}</span>
-                </div>
-                {invoice.roomTaxAmount > 0 ? (
-                  <div style={totalRow}>
-                    <span style={{ color: MUTED }}>Room GST</span>
-                    <span>{fmtMoney(invoice.roomTaxAmount, rs)}</span>
-                  </div>
-                ) : null}
-                {invoice.discountAmount > 0 ? (
-                  <div style={totalRow}>
-                    <span style={{ color: MUTED }}>Discount</span>
-                    <span>−{fmtMoney(invoice.discountAmount, rs)}</span>
-                  </div>
-                ) : null}
-                <div style={{ ...totalRow, marginTop: 8, borderTop: `1px solid ${LINE}`, paddingTop: 10, fontWeight: 700 }}>
-                  <span style={{ color: MUTED }}>Room total</span>
-                  <span>
-                    {fmtMoney(invoice.roomCharges + invoice.otherExtras + invoice.roomTaxAmount, rs)}
-                  </span>
-                </div>
-              </div>
-              <div style={summaryPanel}>
-                <p style={summaryHeading}>Food breakdown</p>
-                <div style={totalRow}>
-                  <span style={{ color: MUTED }}>Food subtotal</span>
-                  <span>{fmtMoney(invoice.foodTotal, rs)}</span>
-                </div>
-                {invoice.foodTaxAmount > 0 ? (
-                  <div style={totalRow}>
-                    <span style={{ color: MUTED }}>Food GST</span>
-                    <span>{fmtMoney(invoice.foodTaxAmount, rs)}</span>
-                  </div>
-                ) : null}
-                <div style={{ ...totalRow, marginTop: 8, borderTop: `1px solid ${LINE}`, paddingTop: 10, fontWeight: 700 }}>
-                  <span style={{ color: MUTED }}>Food total</span>
-                  <span>{fmtMoney(invoice.foodTotal + invoice.foodTaxAmount, rs)}</span>
-                </div>
-              </div>
-              {invoice.miscTotal && invoice.miscTotal > 0 ? (
-                <div style={summaryPanel}>
-                  <p style={summaryHeading}>Miscellaneous (No GST)</p>
-                  <div style={totalRow}>
-                    <span style={{ color: MUTED }}>Misc subtotal</span>
-                    <span>{fmtMoney(invoice.miscTotal, rs)}</span>
-                  </div>
-                  <div style={totalRow}>
-                    <span style={{ color: MUTED }}>GST (0% Exempt)</span>
-                    <span>{fmtMoney(0, rs)}</span>
-                  </div>
-                  <div style={{ ...totalRow, marginTop: 8, borderTop: `1px solid ${LINE}`, paddingTop: 10, fontWeight: 700 }}>
-                    <span style={{ color: MUTED }}>Misc total</span>
-                    <span>{fmtMoney(invoice.miscTotal, rs)}</span>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <div style={{ marginTop: 24, paddingTop: 18, borderTop: `1px solid ${LINE}` }}>
-              <p style={{ ...summaryHeading, textAlign: "right" }}>Settlement</p>
-              {roomGstPending ? (
-                <p style={{ margin: "0 0 8px", fontSize: 11, color: MUTED }}>
-                  Room GST will be added when the due room bill is cleared at checkout.
-                </p>
-              ) : null}
-              <div
+          if (isFood) {
+            summaryRows.push({
+              label: "Total",
+              value: fmtMoney(invoice.foodTotal, rs),
+            });
+            if (invoice.foodServiceCharge && invoice.foodServiceCharge > 0) {
+              summaryRows.push({
+                label: "Service",
+                value: fmtMoney(invoice.foodServiceCharge, rs),
+              });
+            }
+            if (invoice.foodTaxAmount > 0 || invoice.taxAmount > 0) {
+              const taxAmt = invoice.foodTaxAmount || invoice.taxAmount;
+              summaryRows.push({
+                label: invoice.taxPercent > 0 ? `GST (${invoice.taxPercent}%)` : (invoice.taxLabel || "GST"),
+                value: fmtMoney(taxAmt, rs),
+              });
+            }
+          } else if (isMisc) {
+            summaryRows.push({
+              label: "Total",
+              value: fmtMoney(invoice.miscTotal || invoice.totalBill, rs),
+            });
+            summaryRows.push({
+              label: "GST",
+              value: "0% (Exempt)",
+            });
+          } else if (invoice.type === "room") {
+            const roomSubtotal = (invoice.roomChargesBefore || invoice.roomCharges) + invoice.otherExtras;
+            summaryRows.push({
+              label: "Total",
+              value: fmtMoney(roomSubtotal, rs),
+            });
+            if (invoice.discountAmount > 0) {
+              summaryRows.push({
+                label: invoice.discountPercent > 0 ? `Discount (${invoice.discountPercent}%)` : "Discount",
+                value: `−${fmtMoney(invoice.discountAmount, rs)}`,
+              });
+            }
+            if (invoice.taxAmount > 0) {
+              summaryRows.push({
+                label: invoice.taxPercent > 0 ? `GST (${invoice.taxPercent}%)` : (invoice.taxLabel || "GST"),
+                value: fmtMoney(invoice.taxAmount, rs),
+              });
+            }
+          } else {
+            // Overall invoice
+            const overallSubtotal =
+              (invoice.roomChargesBefore || invoice.roomCharges) +
+              invoice.otherExtras +
+              invoice.foodTotal +
+              (invoice.miscTotal || 0);
+            summaryRows.push({
+              label: "Total",
+              value: fmtMoney(overallSubtotal, rs),
+            });
+            if (invoice.discountAmount > 0) {
+              summaryRows.push({
+                label: invoice.discountPercent > 0 ? `Room Discount (${invoice.discountPercent}%)` : "Discount",
+                value: `−${fmtMoney(invoice.discountAmount, rs)}`,
+              });
+            }
+            if (invoice.foodServiceCharge && invoice.foodServiceCharge > 0) {
+              summaryRows.push({
+                label: "Food Service",
+                value: fmtMoney(invoice.foodServiceCharge, rs),
+              });
+            }
+            if (invoice.roomTaxAmount > 0) {
+              summaryRows.push({
+                label: `Room GST${invoice.taxPercent > 0 ? ` (${invoice.taxPercent}%)` : ""}`,
+                value: fmtMoney(invoice.roomTaxAmount, rs),
+              });
+            }
+            if (invoice.foodTaxAmount > 0) {
+              summaryRows.push({
+                label: "Food GST",
+                value: fmtMoney(invoice.foodTaxAmount, rs),
+              });
+            }
+            if (invoice.miscTotal && invoice.miscTotal > 0) {
+              summaryRows.push({
+                label: "Misc GST",
+                value: "0% (Exempt)",
+              });
+            }
+          }
+
+          const hasLineItems =
+            showRoom ||
+            (showFood && invoice.foodLines.length > 0) ||
+            (showMisc && Boolean(invoice.miscLines?.length));
+
+          return (
+            <div style={{ marginTop: 8 }}>
+              {/* Structured Invoice Table */}
+              <table
                 style={{
-                  width: 360,
-                  maxWidth: "100%",
-                  marginLeft: "auto",
-                  textAlign: "right",
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: 13,
+                  color: INK,
+                  fontFamily: "Arial, Helvetica, sans-serif",
                 }}
               >
-                <div style={{ ...totalRow, fontWeight: 700 }}>
-                  <span>{roomGstPending ? "Current total" : "Total amount"}</span>
-                  <span>{fmtMoney(invoice.totalBill, rs)}</span>
-                </div>
-                <div style={totalRow}>
-                  <span style={{ color: MUTED }}>Amount paid</span>
-                  <span>{fmtMoney(invoice.amountPaid, rs)}</span>
-                </div>
-                <div
-                  style={{
-                    ...totalRow,
-                    marginTop: 6,
-                    paddingTop: 10,
-                    borderTop: `2px solid ${RULE}`,
-                    fontWeight: 800,
-                    fontSize: 15,
-                  }}
-                >
-                  <span>Balance due</span>
-                  <span>{fmtMoney(invoice.balanceDue, rs)}</span>
-                </div>
-              </div>
-            </div>
-            </>
-          ) : (
-          <div
-            style={{
-              width: 360,
-              maxWidth: "100%",
-              marginLeft: "auto",
-              textAlign: "right",
-            }}
-          >
-            {isMisc ? (
-              <>
-                <div style={totalRow}>
-                  <span style={{ color: MUTED }}>Misc subtotal</span>
-                  <span>{fmtMoney(invoice.miscTotal || invoice.totalBill, rs)}</span>
-                </div>
-                <div style={totalRow}>
-                  <span style={{ color: MUTED }}>GST (0% / Exempt)</span>
-                  <span>{fmtMoney(0, rs)}</span>
-                </div>
-              </>
-            ) : null}
-            {showRoom && !isMisc ? (
-              <>
-                <div style={totalRow}>
-                  <span style={{ color: MUTED }}>Room subtotal</span>
-                  <span>
-                    {fmtMoney(invoice.roomChargesBefore || invoice.roomCharges, rs)}
-                  </span>
-                </div>
-                {invoice.taxAmount > 0 && showRoom && !showFood ? (
-                  <div style={totalRow}>
-                    <span style={{ color: MUTED }}>
-                      {invoice.taxLabel || "GST"} ({invoice.taxPercent}%)
-                    </span>
-                    <span>{fmtMoney(invoice.taxAmount, rs)}</span>
+                <colgroup>
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "52%" }} />
+                  <col style={{ width: "19%" }} />
+                  <col style={{ width: "19%" }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th style={thCell}>Qty</th>
+                    <th style={thCell}>Item Detail</th>
+                    <th style={thCell}>Price</th>
+                    <th style={thCell}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {/* Room lines */}
+                  {showRoom ? (
+                    <>
+                      <tr>
+                        <td style={tdCell}>{invoice.nights}</td>
+                        <td style={tdCell}>
+                          Room {invoice.roomNumber} — Accommodation
+                          <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
+                            {invoice.nights} night{invoice.nights === 1 ? "" : "s"} @ {fmtMoney(invoice.nightlyRate, rs)}
+                            {invoice.discountPercent > 0 ? ` · ${invoice.discountPercent}% off` : ""}
+                          </span>
+                        </td>
+                        <td style={tdCell}>{fmtMoney(invoice.nightlyRate, rs)}</td>
+                        <td style={tdCell}>
+                          {fmtMoney(invoice.roomChargesBefore || invoice.roomCharges, rs)}
+                        </td>
+                      </tr>
+                      {invoice.otherExtras > 0 ? (
+                        <tr>
+                          <td style={tdCell}>1</td>
+                          <td style={tdCell}>Extras / Additional room charges</td>
+                          <td style={tdCell}>{fmtMoney(invoice.otherExtras, rs)}</td>
+                          <td style={tdCell}>{fmtMoney(invoice.otherExtras, rs)}</td>
+                        </tr>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  {/* Food lines */}
+                  {showFood
+                    ? invoice.foodLines.map((line, i) => (
+                        <tr key={`${line.orderToken}-${i}`}>
+                          <td style={tdCell}>{line.qty}</td>
+                          <td style={tdCell}>
+                            {line.name}
+                            {line.orderToken ? (
+                              <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
+                                Order #{line.orderToken} · {line.paymentStatus === "paid" ? "Paid" : "Due"}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td style={tdCell}>{fmtMoney(line.unitPrice, rs)}</td>
+                          <td style={tdCell}>{fmtMoney(line.amount, rs)}</td>
+                        </tr>
+                      ))
+                    : null}
+
+                  {/* Misc lines */}
+                  {showMisc && invoice.miscLines?.length
+                    ? invoice.miscLines.map((line, i) => (
+                        <tr key={`${line.billNumber}-${line.name}-${i}`}>
+                          <td style={tdCell}>{line.qty}</td>
+                          <td style={tdCell}>
+                            {line.name}
+                            {line.billNumber ? (
+                              <span style={{ display: "block", fontSize: 11, color: MUTED, marginTop: 2 }}>
+                                {line.billNumber} · Miscellaneous · {line.paymentStatus === "paid" ? "Paid" : "Due"}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td style={tdCell}>{fmtMoney(line.unitPrice, rs)}</td>
+                          <td style={tdCell}>{fmtMoney(line.amount, rs)}</td>
+                        </tr>
+                      ))
+                    : null}
+
+                  {!hasLineItems ? (
+                    <tr>
+                      <td colSpan={4} style={{ ...tdCell, textAlign: "center", padding: "16px", color: MUTED }}>
+                        No items recorded
+                      </td>
+                    </tr>
+                  ) : null}
+
+                  {/* Summary Rows (aligned in Price & Amount columns) */}
+                  {summaryRows.map((row, idx) => (
+                    <tr key={idx}>
+                      <td colSpan={2} style={{ border: "none" }} />
+                      <td style={tdSummaryLabel}>{row.label}</td>
+                      <td style={tdSummaryValue}>{row.value}</td>
+                    </tr>
+                  ))}
+
+                  {/* Spacer before Grand Total */}
+                  <tr style={{ height: 10 }}>
+                    <td colSpan={4} style={{ border: "none", padding: 0 }} />
+                  </tr>
+
+                  {/* Grand Total Row */}
+                  <tr>
+                    <td colSpan={3} style={tdGrandTotalLabel}>
+                      Grand Total
+                    </td>
+                    <td style={tdGrandTotalValue}>
+                      {fmtMoney(invoice.totalBill, rs)}
+                    </td>
+                  </tr>
+
+                  {/* Amount Paid */}
+                  <tr>
+                    <td colSpan={3} style={tdSettlementLabel}>
+                      Amount Paid
+                    </td>
+                    <td style={tdSettlementValue}>
+                      {fmtMoney(invoice.amountPaid, rs)}
+                    </td>
+                  </tr>
+
+                  {/* Balance Due */}
+                  <tr>
+                    <td colSpan={3} style={tdSettlementLabel}>
+                      Balance Due
+                    </td>
+                    <td
+                      style={{
+                        ...tdSettlementValue,
+                        color: invoice.balanceDue > 0 ? "#b91c1c" : INK,
+                      }}
+                    >
+                      {fmtMoney(invoice.balanceDue, rs)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {/* Overall Stay Category Breakdown (for combined folio) */}
+              {isOverall ? (
+                <div style={{ marginTop: 24, paddingTop: 18, borderTop: `1px solid ${LINE}` }}>
+                  <p style={summaryHeading}>Stay Folio Summary</p>
+                  {roomGstPending ? (
+                    <p style={{ margin: "0 0 10px", fontSize: 11, color: MUTED }}>
+                      Room GST will be added when the due room bill is cleared at checkout.
+                    </p>
+                  ) : null}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        invoice.miscTotal && invoice.miscTotal > 0
+                          ? "repeat(auto-fit, minmax(180px, 1fr))"
+                          : "1fr 1fr",
+                      gap: 16,
+                    }}
+                  >
+                    <div style={summaryPanel}>
+                      <p style={summaryHeading}>Room breakdown</p>
+                      <div style={totalRow}>
+                        <span style={{ color: MUTED }}>Room subtotal</span>
+                        <span>{fmtMoney(invoice.roomChargesBefore || invoice.roomCharges, rs)}</span>
+                      </div>
+                      {invoice.roomTaxAmount > 0 ? (
+                        <div style={totalRow}>
+                          <span style={{ color: MUTED }}>Room GST</span>
+                          <span>{fmtMoney(invoice.roomTaxAmount, rs)}</span>
+                        </div>
+                      ) : null}
+                      {invoice.discountAmount > 0 ? (
+                        <div style={totalRow}>
+                          <span style={{ color: MUTED }}>Discount</span>
+                          <span>−{fmtMoney(invoice.discountAmount, rs)}</span>
+                        </div>
+                      ) : null}
+                      <div
+                        style={{
+                          ...totalRow,
+                          marginTop: 6,
+                          borderTop: `1px solid ${LINE}`,
+                          paddingTop: 8,
+                          fontWeight: 700,
+                        }}
+                      >
+                        <span style={{ color: MUTED }}>Room total</span>
+                        <span>
+                          {fmtMoney(invoice.roomCharges + invoice.otherExtras + invoice.roomTaxAmount, rs)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={summaryPanel}>
+                      <p style={summaryHeading}>Food breakdown</p>
+                      <div style={totalRow}>
+                        <span style={{ color: MUTED }}>Food subtotal</span>
+                        <span>{fmtMoney(invoice.foodTotal, rs)}</span>
+                      </div>
+                      {invoice.foodTaxAmount > 0 ? (
+                        <div style={totalRow}>
+                          <span style={{ color: MUTED }}>Food GST</span>
+                          <span>{fmtMoney(invoice.foodTaxAmount, rs)}</span>
+                        </div>
+                      ) : null}
+                      <div
+                        style={{
+                          ...totalRow,
+                          marginTop: 6,
+                          borderTop: `1px solid ${LINE}`,
+                          paddingTop: 8,
+                          fontWeight: 700,
+                        }}
+                      >
+                        <span style={{ color: MUTED }}>Food total</span>
+                        <span>{fmtMoney(invoice.foodTotal + invoice.foodTaxAmount, rs)}</span>
+                      </div>
+                    </div>
+
+                    {invoice.miscTotal && invoice.miscTotal > 0 ? (
+                      <div style={summaryPanel}>
+                        <p style={summaryHeading}>Miscellaneous (No GST)</p>
+                        <div style={totalRow}>
+                          <span style={{ color: MUTED }}>Misc subtotal</span>
+                          <span>{fmtMoney(invoice.miscTotal, rs)}</span>
+                        </div>
+                        <div style={totalRow}>
+                          <span style={{ color: MUTED }}>GST (0% Exempt)</span>
+                          <span>{fmtMoney(0, rs)}</span>
+                        </div>
+                        <div
+                          style={{
+                            ...totalRow,
+                            marginTop: 6,
+                            borderTop: `1px solid ${LINE}`,
+                            paddingTop: 8,
+                            fontWeight: 700,
+                          }}
+                        >
+                          <span style={{ color: MUTED }}>Misc total</span>
+                          <span>{fmtMoney(invoice.miscTotal, rs)}</span>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-                {invoice.discountPercent > 0 && invoice.discountAmount > 0 ? (
-                  <div style={totalRow}>
-                    <span style={{ color: MUTED }}>
-                      Discount ({invoice.discountPercent}%)
-                    </span>
-                    <span>−{fmtMoney(invoice.discountAmount, rs)}</span>
-                  </div>
-                ) : null}
-                <div style={totalRow}>
-                  <span style={{ color: MUTED }}>Room total</span>
-                  <span>{fmtMoney(invoice.roomCharges, rs)}</span>
                 </div>
-                {invoice.otherExtras > 0 ? (
-                  <div style={totalRow}>
-                    <span style={{ color: MUTED }}>Extras</span>
-                    <span>{fmtMoney(invoice.otherExtras, rs)}</span>
-                  </div>
-                ) : null}
-              </>
-            ) : null}
-            {showFood && !isMisc && invoice.foodTotal > 0 ? (
-              <div style={totalRow}>
-                <span style={{ color: MUTED }}>Food</span>
-                <span>{fmtMoney(invoice.foodTotal, rs)}</span>
-              </div>
-            ) : null}
-            {invoice.taxAmount > 0 && (showFood || (showRoom && showFood)) && !isMisc ? (
-              <div style={totalRow}>
-                <span style={{ color: MUTED }}>
-                  {invoice.taxLabel || "GST"} ({invoice.taxPercent}%)
-                </span>
-                <span>{fmtMoney(invoice.taxAmount, rs)}</span>
-              </div>
-            ) : null}
-            <div style={{ ...totalRow, fontWeight: 700 }}>
-              <span>Total amount</span>
-              <span>{fmtMoney(invoice.totalBill, rs)}</span>
+              ) : null}
             </div>
-            <div style={totalRow}>
-              <span style={{ color: MUTED }}>Amount paid</span>
-              <span>{fmtMoney(invoice.amountPaid, rs)}</span>
-            </div>
-            <div
-              style={{
-                ...totalRow,
-                marginTop: 6,
-                paddingTop: 10,
-                borderTop: `2px solid ${RULE}`,
-                fontWeight: 800,
-                fontSize: 15,
-              }}
-            >
-              <span>Balance due</span>
-              <span>{fmtMoney(invoice.balanceDue, rs)}</span>
-            </div>
-          </div>
-          )}
-        </div>
+          );
+        })()}
 
         {/* Footer */}
         <div
@@ -702,32 +728,93 @@ const partyLine: CSSProperties = {
   lineHeight: 1.45,
 };
 
-const thLeft: CSSProperties = {
+const thCell: CSSProperties = {
+  border: `1px solid ${RULE}`,
+  padding: "8px 10px",
   textAlign: "left",
-  padding: "10px 6px",
-  borderLeft: `1px solid ${LINE}`,
-  borderBottom: `1px solid ${RULE}`,
-  borderTop: `1px solid ${RULE}`,
-  fontSize: 10,
-  letterSpacing: "0.12em",
-  textTransform: "uppercase",
-  color: MUTED,
+  fontSize: 13,
   fontWeight: 700,
-  background: PAPER,
-};
-const thCenter: CSSProperties = { ...thLeft, textAlign: "center" };
-const thRight: CSSProperties = { ...thLeft, textAlign: "right" };
-
-const tdLeft: CSSProperties = {
-  padding: "12px 6px",
-  borderLeft: `1px solid ${LINE}`,
-  borderBottom: `1px solid ${LINE}`,
-  verticalAlign: "top",
   color: INK,
   background: PAPER,
+  boxSizing: "border-box",
 };
-const tdCenter: CSSProperties = { ...tdLeft, textAlign: "center" };
-const tdRight: CSSProperties = { ...tdLeft, textAlign: "right" };
+
+const tdCell: CSSProperties = {
+  border: `1px solid ${RULE}`,
+  padding: "7px 10px",
+  textAlign: "left",
+  fontSize: 13,
+  color: INK,
+  background: PAPER,
+  verticalAlign: "middle",
+  boxSizing: "border-box",
+};
+
+const tdSummaryLabel: CSSProperties = {
+  border: `1px solid ${RULE}`,
+  padding: "6px 10px",
+  textAlign: "left",
+  fontSize: 13,
+  fontWeight: 700,
+  color: INK,
+  background: PAPER,
+  boxSizing: "border-box",
+};
+
+const tdSummaryValue: CSSProperties = {
+  border: `1px solid ${RULE}`,
+  padding: "6px 10px",
+  textAlign: "left",
+  fontSize: 13,
+  fontWeight: 600,
+  color: INK,
+  background: PAPER,
+  boxSizing: "border-box",
+};
+
+const tdGrandTotalLabel: CSSProperties = {
+  border: `1px solid ${RULE}`,
+  padding: "8px 10px",
+  textAlign: "left",
+  fontSize: 14,
+  fontWeight: 700,
+  color: INK,
+  background: PAPER,
+  boxSizing: "border-box",
+};
+
+const tdGrandTotalValue: CSSProperties = {
+  border: `1px solid ${RULE}`,
+  padding: "8px 10px",
+  textAlign: "left",
+  fontSize: 14,
+  fontWeight: 700,
+  color: INK,
+  background: PAPER,
+  boxSizing: "border-box",
+};
+
+const tdSettlementLabel: CSSProperties = {
+  border: `1px solid ${RULE}`,
+  padding: "7px 10px",
+  textAlign: "left",
+  fontSize: 13,
+  fontWeight: 700,
+  color: INK,
+  background: PAPER,
+  boxSizing: "border-box",
+};
+
+const tdSettlementValue: CSSProperties = {
+  border: `1px solid ${RULE}`,
+  padding: "7px 10px",
+  textAlign: "left",
+  fontSize: 13,
+  fontWeight: 700,
+  color: INK,
+  background: PAPER,
+  boxSizing: "border-box",
+};
 
 const totalRow: CSSProperties = {
   display: "flex",
