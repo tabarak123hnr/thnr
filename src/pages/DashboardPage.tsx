@@ -291,17 +291,6 @@ export function DashboardPage() {
         subtitle={t.todaySub}
         actions={
           <>
-            <a
-              href="https://hoteleye.punjab.gov.pk/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3.5 py-2 text-sm font-semibold text-sky-900 shadow-xs transition-all hover:border-sky-300 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/50"
-              title="Open Hotel Eye - Punjab Police Portal"
-            >
-              <Eye className="h-6 w-6 text-sky-600 dark:text-sky-400" />
-              <span>Hotel Eye</span>
-              <ArrowUpRight className="h-3.5 w-3.5 opacity-60" />
-            </a>
             <Link to="/check-in" className="w-full md:hidden sm:w-auto">
               <Button className="w-full sm:w-auto">{t.newCheckIn}</Button>
             </Link>
@@ -314,7 +303,7 @@ export function DashboardPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
           label={t.arriving}
           value={String(kpis.arriving)}
@@ -341,6 +330,25 @@ export function DashboardPage() {
           value={formatRs(revenue.total, t.common.rs)}
           hint={t.roomsPlusRestaurant}
         />
+        <a
+          href="https://hoteleye.punjab.gov.pk/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="surface group relative rounded-2xl p-4 transition-all hover:border-sky-300 hover:bg-sky-50 sm:p-5 dark:hover:border-sky-800 dark:hover:bg-sky-950/50"
+          title="Open Hotel Eye - Punjab Police Portal"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-sm font-medium text-muted">Hotel Eye</p>
+            <Eye className="h-6 w-6 shrink-0 text-sky-600 dark:text-sky-400" />
+          </div>
+          <p className="mt-2 text-2xl font-extrabold tracking-tight sm:text-3xl">
+            Open portal
+          </p>
+          <p className="mt-1 inline-flex items-center gap-1 text-xs text-muted">
+            Punjab Police
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </p>
+        </a>
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.4fr_1fr]">
