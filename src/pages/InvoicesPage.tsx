@@ -401,9 +401,18 @@ export function InvoicesPage() {
   }, [gstTarget, gstTaxRate, gstServiceCharge, gstDiscountPercent]);
 
   function canApplyGst(inv: GuestInvoice) {
-    if (inv.type === "restaurant") return !inv.billClearedAt;
+    // Food: paid or due — only if GST not applied yet and bill not cleared
+    if (inv.type === "restaurant") {
+      return !inv.billClearedAt && inv.taxPercent <= 0;
+    }
+    // Room: only when payment is fully due (nothing collected yet) and GST not applied
     if (inv.type === "room") {
-      return inv.paymentTiming === "due_on_checkout" || inv.balanceDue > 0;
+      return (
+        inv.paymentTiming === "due_on_checkout" &&
+        inv.amountPaid <= 0 &&
+        inv.balanceDue > 0 &&
+        inv.taxPercent <= 0
+      );
     }
     return false;
   }
@@ -915,7 +924,7 @@ export function InvoicesPage() {
                           icon={<Percent className="h-3.5 w-3.5" />}
                           onClick={() => openApplyGst(inv)}
                         >
-                          {inv.taxPercent > 0 ? "Edit GST" : "Apply GST"}
+                          Apply GST
                         </Button>
                       ) : null}
                       {inv.type !== "overall" &&
