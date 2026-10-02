@@ -177,13 +177,6 @@ export function buildRoomInvoice(
   const foodPretax = stayOrders.reduce((s, o) => s + (o.amount || 0), 0);
   const settled = isStaySettled(row);
 
-  const foodTax = foodGstForStay(row, foodPretax).taxAmount;
-  const foodPaidTickets = settled || row.foodBillClearedAt
-    ? roundMoney(foodPretax + foodTax)
-    : stayOrders
-        .filter((o) => o.paymentStatus === "paid")
-        .reduce((s, o) => s + (o.amount || 0), 0);
-
   const otherExtras = Math.max(0, (bill.extraCharges || 0) - foodPretax);
   const pct = bill.taxPercent || 0;
 
@@ -203,9 +196,26 @@ export function buildRoomInvoice(
   );
 
   const stayPaid = Math.max(0, Number(row.amountPaid) || 0);
-  const roomPaidRaw = row.roomBillClearedAt || settled
-    ? roomTotal
-    : Math.max(0, stayPaid - foodPaidTickets);
+  // Shared stay.amountPaid may include pretax food paid at the counter (paidDelta).
+  // Food GST / service charges must NEVER reduce the room folio — they live on food only.
+  const foodPretaxInSharedPool = stayOrders
+    .filter((o) => o.paymentStatus === "paid")
+    .reduce((s, o) => s + (o.amount || 0), 0);
+  // After food clear, all tickets are marked paid — still only pretax was ever in amountPaid.
+  const foodInPool = row.foodBillClearedAt || settled ? foodPretax : foodPretaxInSharedPool;
+
+  let roomPaidRaw: number;
+  if (row.roomBillClearedAt || settled) {
+    roomPaidRaw = roomTotal;
+  } else if (stayPaid >= roomTotal) {
+    // Room was fully covered (e.g. paid at check-in). Food GST/clear cannot un-pay it.
+    roomPaidRaw = roomTotal;
+  } else {
+    roomPaidRaw = Math.min(
+      roomTotal,
+      Math.max(0, stayPaid - Math.min(foodInPool, stayPaid)),
+    );
+  }
   const split = paymentFromSplit(roomTotal, roomPaidRaw);
   const roomCleared = Boolean(row.roomBillClearedAt);
 

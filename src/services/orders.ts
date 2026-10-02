@@ -467,6 +467,16 @@ export async function clearGuestFoodBill(
     foodServiceCharge: serviceCharge,
     foodBillPaymentMethod: input.paymentMethod,
     foodBillClearedAt: clearedAt,
+    // Only roll unpaid food pretax into the shared stay pool (counter-style).
+    // Never add food GST/service here — those belong to the food folio only and
+    // must not change room paid attribution.
+    ...(paidPretax < foodSubtotal
+      ? {
+          amountPaid: roundMoney(
+            Math.max(0, Number(stay.amountPaid ?? 0)) + (foodSubtotal - paidPretax),
+          ),
+        }
+      : {}),
     updatedAt: serverTimestamp(),
   });
 

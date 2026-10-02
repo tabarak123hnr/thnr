@@ -891,22 +891,36 @@ export async function clearRoomBill(
   const foodSubtotal = roundMoney(
     ordersSnap.docs.reduce((sum, order) => sum + (Number(order.data().amount) || 0), 0),
   );
-  const foodTaxPercent = Number(data.foodTaxPercent ?? 0) || 0;
-  const foodTax = foodTaxPercent > 0
-    ? roundMoney((foodSubtotal * foodTaxPercent) / 100)
-    : 0;
-  const foodPaid = data.foodBillClearedAt
-    ? roundMoney(foodSubtotal + foodTax)
+  // Only pretax food paid at the counter lives in stay.amountPaid — never food GST/service.
+  const foodPaidInSharedPool = data.foodBillClearedAt
+    ? foodSubtotal
     : ordersSnap.docs
         .filter((order) => String(order.data().paymentStatus ?? "due") === "paid")
         .reduce((sum, order) => sum + (Number(order.data().amount) || 0), 0);
   const priorPaid = Math.max(0, Number(data.amountPaid ?? 0));
-  const roomPaidBeforeClear = Math.max(0, priorPaid - foodPaid);
-  const roomAlreadyPartial = roomPaidBeforeClear > 0;
-  const roomExtraCharges = Math.max(
+  // If stay cash already covers the room folio, food clear/GST cannot reduce room paid.
+  const roomExtraChargesPreview = Math.max(
     0,
     (Number(data.extraCharges ?? 0) || 0) - foodSubtotal,
   ) + Math.max(0, Number(options?.serviceCharge) || 0);
+  const roomPreview = calcRoomBill(
+    Number(data.nightlyRate ?? 0),
+    String(data.checkInAt ?? ""),
+    String(data.checkOutAt ?? ""),
+    roomExtraChargesPreview,
+    Number(data.discountPercent ?? 0),
+    {
+      taxPercent: Number(data.taxPercent ?? 0) || 0,
+      taxAppliesToRoom: data.taxAppliesToRoom !== false,
+      taxAppliesToFood: false,
+    },
+  );
+  const roomPaidBeforeClear =
+    priorPaid >= roomPreview.totalBill
+      ? roomPreview.totalBill
+      : Math.max(0, priorPaid - foodPaidInSharedPool);
+  const roomAlreadyPartial = roomPaidBeforeClear > 0;
+  const roomExtraCharges = roomExtraChargesPreview;
   const bill = calcRoomBill(
     Number(data.nightlyRate ?? 0),
     String(data.checkInAt ?? ""),
@@ -1063,14 +1077,14 @@ export async function applyRoomGst(
     foodTaxPercent > 0
       ? roundMoney(((foodSubtotal + foodServiceCharge) * foodTaxPercent) / 100)
       : 0;
-  const foodPaid = data.foodBillClearedAt
-    ? roundMoney(foodSubtotal + foodServiceCharge + foodTax)
+  // Shared amountPaid only ever holds pretax food from the counter — never GST/service.
+  const foodPaidInSharedPool = data.foodBillClearedAt
+    ? foodSubtotal
     : ordersSnap.docs
         .filter((order) => String(order.data().paymentStatus ?? "due") === "paid")
         .reduce((sum, order) => sum + (Number(order.data().amount) || 0), 0);
 
   const priorPaid = Math.max(0, Number(data.amountPaid ?? 0));
-  const roomPaidBefore = Math.max(0, priorPaid - foodPaid);
   const serviceCharge = Math.max(0, Number(input.serviceCharge) || 0);
   const roomExtraCharges =
     Math.max(0, (Number(data.extraCharges ?? 0) || 0) - foodSubtotal) + serviceCharge;
@@ -1095,6 +1109,10 @@ export async function applyRoomGst(
   );
 
   const roomTotal = bill.totalBill;
+  const roomPaidBefore =
+    priorPaid >= roomTotal
+      ? roomTotal
+      : Math.max(0, priorPaid - foodPaidInSharedPool);
   const toCollect = roundMoney(Math.max(0, roomTotal - roomPaidBefore));
   const stayTotal = roundMoney(roomTotal + foodSubtotal + foodServiceCharge + foodTax);
   const stayBalance = roundMoney(Math.max(0, stayTotal - priorPaid));
