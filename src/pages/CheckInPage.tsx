@@ -1,4 +1,4 @@
-import { Eye, IdCard, ImagePlus, Lock, LogOut, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { Eye, FileImage, IdCard, ImagePlus, Lock, LogOut, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Badge } from "../components/ui/Badge";
@@ -11,7 +11,7 @@ import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
 import { calcCheckoutBill, calcRoomBill, clampDiscountPercent, taxOptionsFromStay } from "../lib/billing";
-import { uploadImageToCloudinary } from "../lib/cloudinary";
+import { uploadImageToCloudinary, uploadImagesToCloudinary } from "../lib/cloudinary";
 import {
   isGuestEmailConfigured,
   sendGuestCheckInEmail,
@@ -374,6 +374,7 @@ export function CheckInPage() {
   const cnicFrontRef = useRef<HTMLInputElement>(null);
   const cnicBackRef = useRef<HTMLInputElement>(null);
   const guestPhotoRef = useRef<HTMLInputElement>(null);
+  const additionalDocsRef = useRef<HTMLInputElement>(null);
 
   const staffDisplayName =
     profile?.name || user?.displayName || user?.email?.split("@")[0] || "";
@@ -409,6 +410,9 @@ export function CheckInPage() {
   const [cnicBackPreview, setCnicBackPreview] = useState<string | null>(null);
   const [existingCnicFrontUrl, setExistingCnicFrontUrl] = useState<string | null>(null);
   const [existingCnicBackUrl, setExistingCnicBackUrl] = useState<string | null>(null);
+  const [additionalDocFiles, setAdditionalDocFiles] = useState<File[]>([]);
+  const [additionalDocPreviews, setAdditionalDocPreviews] = useState<string[]>([]);
+  const [existingAdditionalDocUrls, setExistingAdditionalDocUrls] = useState<string[]>([]);
   const [nightlyRate, setNightlyRate] = useState(0);
   const [extraCharges, setExtraCharges] = useState(0);
   const [discountPercent, setDiscountPercent] = useState("");
@@ -440,8 +444,9 @@ export function CheckInPage() {
       if (cnicFrontPreview) URL.revokeObjectURL(cnicFrontPreview);
       if (cnicBackPreview) URL.revokeObjectURL(cnicBackPreview);
       if (guestPhotoPreview) URL.revokeObjectURL(guestPhotoPreview);
+      for (const url of additionalDocPreviews) URL.revokeObjectURL(url);
     };
-  }, [cnicFrontPreview, cnicBackPreview, guestPhotoPreview]);
+  }, [cnicFrontPreview, cnicBackPreview, guestPhotoPreview, additionalDocPreviews]);
 
   const availableRooms = useMemo(
     () =>
@@ -551,6 +556,7 @@ export function CheckInPage() {
     if (cnicFrontPreview) URL.revokeObjectURL(cnicFrontPreview);
     if (cnicBackPreview) URL.revokeObjectURL(cnicBackPreview);
     if (guestPhotoPreview) URL.revokeObjectURL(guestPhotoPreview);
+    for (const url of additionalDocPreviews) URL.revokeObjectURL(url);
     setCnicFrontFile(null);
     setCnicBackFile(null);
     setGuestPhotoFile(null);
@@ -560,6 +566,9 @@ export function CheckInPage() {
     setExistingGuestPhotoUrl(null);
     setExistingCnicFrontUrl(null);
     setExistingCnicBackUrl(null);
+    setAdditionalDocFiles([]);
+    setAdditionalDocPreviews([]);
+    setExistingAdditionalDocUrls([]);
   }
 
   function openCreate() {
@@ -697,6 +706,9 @@ export function CheckInPage() {
     setExistingCnicFrontUrl(row.cnicFrontImageUrl || row.cnicImageUrl);
     setExistingCnicBackUrl(row.cnicBackImageUrl);
     setExistingGuestPhotoUrl(row.guestPhotoUrl);
+    setAdditionalDocFiles([]);
+    setAdditionalDocPreviews([]);
+    setExistingAdditionalDocUrls(row.additionalDocumentUrls ?? []);
     setFormError(null);
     setEditingId(row.id);
     setLockedRoomId(row.roomId);
@@ -865,6 +877,33 @@ export function CheckInPage() {
     setGuestPhotoPreview(file ? URL.createObjectURL(file) : null);
   }
 
+  function onPickAdditionalDocs(files: FileList | null) {
+    if (!files?.length) return;
+    const nextFiles: File[] = [];
+    const nextPreviews: string[] = [];
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      nextFiles.push(file);
+      nextPreviews.push(URL.createObjectURL(file));
+    }
+    if (!nextFiles.length) return;
+    setAdditionalDocFiles((prev) => [...prev, ...nextFiles]);
+    setAdditionalDocPreviews((prev) => [...prev, ...nextPreviews]);
+  }
+
+  function removeNewAdditionalDoc(index: number) {
+    setAdditionalDocPreviews((prev) => {
+      const url = prev[index];
+      if (url) URL.revokeObjectURL(url);
+      return prev.filter((_, i) => i !== index);
+    });
+    setAdditionalDocFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function removeExistingAdditionalDoc(index: number) {
+    setExistingAdditionalDocUrls((prev) => prev.filter((_, i) => i !== index));
+  }
+
   function onPickCompanionImage(
     index: number,
     field: "photo" | "cnicFront" | "cnicBack",
@@ -982,6 +1021,15 @@ export function CheckInPage() {
         cnicBackUrl = await uploadImageToCloudinary(cnicBackFile, "tabarak/checkins");
       }
 
+      const uploadedAdditionalDocs =
+        additionalDocFiles.length > 0
+          ? await uploadImagesToCloudinary(additionalDocFiles, "tabarak/checkins/documents")
+          : [];
+      const additionalDocumentUrls = [
+        ...existingAdditionalDocUrls,
+        ...uploadedAdditionalDocs,
+      ];
+
       const companionPayload: CheckInCompanion[] =
         adults + children > 1
           ? await Promise.all(
@@ -1040,6 +1088,7 @@ export function CheckInPage() {
           cnicBackImageUrl: cnicBackUrl ?? null,
           cnicImageUrl: cnicFrontUrl ?? null,
           guestPhotoUrl: guestPhotoUrl ?? null,
+          additionalDocumentUrls,
           paymentTiming: form.paymentTiming,
           amountPaidAtCheckIn: paidNow,
           taxRateId: liveBill.taxRateId,
@@ -1070,6 +1119,7 @@ export function CheckInPage() {
           cnicFrontImageUrl: cnicFrontUrl ?? null,
           cnicBackImageUrl: cnicBackUrl ?? null,
           guestPhotoUrl: guestPhotoUrl ?? null,
+          additionalDocumentUrls,
           notes: form.notes,
           checkedInBy: form.checkedInBy,
           vehicleColor: form.vehicleColor,
@@ -1492,6 +1542,30 @@ export function CheckInPage() {
                     />
                   </a>
                 ) : null}
+              </div>
+            ) : null}
+            {viewRow.additionalDocumentUrls?.length ? (
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
+                  Additional documents
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {viewRow.additionalDocumentUrls.map((url, index) => (
+                    <a
+                      key={`view-doc-${index}`}
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-block"
+                    >
+                      <img
+                        src={url}
+                        alt={`Document ${index + 1}`}
+                        className="h-28 w-full rounded-xl border border-app object-cover"
+                      />
+                    </a>
+                  ))}
+                </div>
               </div>
             ) : null}
           </div>
@@ -2042,6 +2116,90 @@ export function CheckInPage() {
                   setExistingCnicBackUrl(null);
                 }}
               />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-app p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <FileImage className="h-4 w-4 text-[var(--accent)]" />
+              <div>
+                <p className="text-sm font-bold">Additional documents (optional)</p>
+                <p className="text-xs text-muted">
+                  Upload multiple photos — passport, visa, other IDs. Stored on Cloudinary.
+                </p>
+              </div>
+            </div>
+            <input
+              ref={additionalDocsRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                onPickAdditionalDocs(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <div className="grid gap-3 sm:grid-cols-3">
+              {existingAdditionalDocUrls.map((url, index) => (
+                <div
+                  key={`existing-doc-${index}`}
+                  className="rounded-xl border border-dashed border-app bg-app p-3"
+                >
+                  <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
+                    Document {index + 1}
+                  </p>
+                  <img
+                    src={url}
+                    alt={`Additional document ${index + 1}`}
+                    className="h-28 w-full rounded-lg border border-app object-cover"
+                  />
+                  <div className="mt-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => removeExistingAdditionalDoc(index)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {additionalDocPreviews.map((preview, index) => (
+                <div
+                  key={`new-doc-${index}`}
+                  className="rounded-xl border border-dashed border-app bg-app p-3"
+                >
+                  <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
+                    New {existingAdditionalDocUrls.length + index + 1}
+                  </p>
+                  <img
+                    src={preview}
+                    alt={`New document ${index + 1}`}
+                    className="h-28 w-full rounded-lg border border-app object-cover"
+                  />
+                  <div className="mt-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => removeNewAdditionalDoc(index)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => additionalDocsRef.current?.click()}
+                className="flex min-h-[9.5rem] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-app bg-app px-3 py-6 text-muted transition hover:border-[var(--accent)]"
+              >
+                <ImagePlus className="h-6 w-6 opacity-50" />
+                <span className="text-xs font-semibold">Add photos</span>
+                <span className="text-[11px] opacity-70">Select one or more</span>
+              </button>
             </div>
           </div>
 

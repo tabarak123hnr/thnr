@@ -7,6 +7,7 @@ import {
   Printer,
   RefreshCw,
   CheckCircle,
+  Percent,
   Plus,
   Trash2,
   Sparkles,
@@ -32,10 +33,17 @@ import {
   fetchCheckIns,
   subscribeCheckIns,
   clearRoomBill,
+  applyRoomGst,
   type CheckInRecord,
   type PaymentMethod,
 } from "../services/checkIns";
-import { clearGuestFoodBill, fetchOrders, subscribeOrders, type FoodOrder } from "../services/orders";
+import {
+  applyGuestFoodGst,
+  clearGuestFoodBill,
+  fetchOrders,
+  subscribeOrders,
+  type FoodOrder,
+} from "../services/orders";
 import { subscribeTaxRates, type TaxRate } from "../services/taxRates";
 import {
   fetchMiscBills,
@@ -122,6 +130,13 @@ export function InvoicesPage() {
   const [clearDiscountPercent, setClearDiscountPercent] = useState("");
   const [clearServiceCharge, setClearServiceCharge] = useState("");
   const [clearBusy, setClearBusy] = useState(false);
+
+  /* ── Apply GST modal state ── */
+  const [gstTarget, setGstTarget] = useState<GuestInvoice | null>(null);
+  const [gstTaxSelect, setGstTaxSelect] = useState("none");
+  const [gstServiceCharge, setGstServiceCharge] = useState("");
+  const [gstDiscountPercent, setGstDiscountPercent] = useState("");
+  const [gstBusy, setGstBusy] = useState(false);
 
   /* ── Add Miscellaneous modal state ── */
   const [miscModalOpen, setMiscModalOpen] = useState(false);
@@ -247,6 +262,15 @@ export function InvoicesPage() {
     [taxRates],
   );
 
+  function matchTaxSelect(inv: GuestInvoice, forRoom: boolean) {
+    if (inv.taxPercent <= 0) return "none";
+    const pool = taxRates.filter((t) =>
+      forRoom ? t.active && t.appliesToRoom : t.active && t.appliesToFood,
+    );
+    const byPct = pool.find((t) => t.percent === inv.taxPercent);
+    return byPct?.id ?? "none";
+  }
+
   const clearNeedsPaymentDetails =
     clearTarget?.type === "restaurant" ||
     clearTarget?.type === "miscellaneous" ||
@@ -258,38 +282,188 @@ export function InvoicesPage() {
   }, [taxRates, clearTaxSelect]);
 
   const clearPreview = useMemo(() => {
-    if (!clearTarget) return { subtotal: 0, serviceCharge: 0, gst: 0, total: 0 };
+    if (!clearTarget) {
+      return { subtotal: 0, serviceCharge: 0, gst: 0, total: 0, amountPaid: 0, toCollect: 0 };
+    }
     if (clearTarget.type === "miscellaneous") {
-      return { subtotal: clearTarget.totalBill, serviceCharge: 0, gst: 0, total: clearTarget.totalBill };
+      return {
+        subtotal: clearTarget.totalBill,
+        serviceCharge: 0,
+        gst: 0,
+        total: clearTarget.totalBill,
+        amountPaid: clearTarget.amountPaid,
+        toCollect: clearTarget.balanceDue,
+      };
     }
     if (clearTarget.type === "room") {
+      const serviceCharge = Number(clearServiceCharge) || 0;
       const bill = calcRoomBill(
         clearTarget.nightlyRate,
         clearTarget.checkInAt,
         clearTarget.checkOutAt,
-        clearTarget.otherExtras + (Number(clearServiceCharge) || 0),
-        clampDiscountPercent(clearDiscountPercent),
+        clearTarget.otherExtras + serviceCharge,
+        clampDiscountPercent(
+          clearDiscountPercent !== ""
+            ? clearDiscountPercent
+            : clearTarget.discountPercent,
+        ),
         {
           ...taxOptionsFromStay(clearTarget),
-          taxPercent: clearTaxRate?.percent ?? 0,
+          taxPercent:
+            clearTaxSelect === "none"
+              ? 0
+              : (clearTaxRate?.percent ?? clearTarget.taxPercent),
           taxAppliesToFood: false,
         },
       );
+      const total = bill.totalBill;
+      const amountPaid = clearTarget.amountPaid;
       return {
-        subtotal: bill.roomChargesBefore + bill.extraCharges - (Number(clearServiceCharge) || 0),
-        serviceCharge: Number(clearServiceCharge) || 0,
+        subtotal: bill.roomChargesBefore + bill.extraCharges - serviceCharge,
+        serviceCharge,
         gst: bill.taxAmount,
-        total: bill.totalBill,
+        total,
+        amountPaid,
+        toCollect: roundMoney(Math.max(0, total - amountPaid)),
       };
     }
     const subtotal = clearTarget.foodTotal;
-    const serviceCharge = clearTarget.type === "restaurant"
-      ? Math.max(0, Number(clearServiceCharge) || 0)
-      : 0;
-    const pct = clearTaxRate?.percent ?? 0;
+    const serviceCharge =
+      clearTarget.type === "restaurant"
+        ? Math.max(0, Number(clearServiceCharge) || 0)
+        : 0;
+    const pct =
+      clearTaxSelect === "none"
+        ? 0
+        : (clearTaxRate?.percent ?? clearTarget.taxPercent);
     const gst = pct > 0 ? roundMoney(((subtotal + serviceCharge) * pct) / 100) : 0;
-    return { subtotal, serviceCharge, gst, total: roundMoney(subtotal + serviceCharge + gst) };
-  }, [clearTarget, clearTaxRate, clearDiscountPercent, clearServiceCharge]);
+    const total = roundMoney(subtotal + serviceCharge + gst);
+    const amountPaid = clearTarget.amountPaid;
+    return {
+      subtotal,
+      serviceCharge,
+      gst,
+      total,
+      amountPaid,
+      toCollect: roundMoney(Math.max(0, total - amountPaid)),
+    };
+  }, [clearTarget, clearTaxRate, clearTaxSelect, clearDiscountPercent, clearServiceCharge]);
+
+  const gstTaxRate = useMemo(() => {
+    if (gstTaxSelect === "none") return null;
+    return taxRates.find((t) => t.id === gstTaxSelect) ?? null;
+  }, [taxRates, gstTaxSelect]);
+
+  const gstPreview = useMemo(() => {
+    if (!gstTarget) {
+      return { subtotal: 0, serviceCharge: 0, gst: 0, total: 0, amountPaid: 0, toCollect: 0 };
+    }
+    const serviceCharge = Math.max(0, Number(gstServiceCharge) || 0);
+    const pct = gstTaxRate?.percent ?? 0;
+    if (gstTarget.type === "room") {
+      const bill = calcRoomBill(
+        gstTarget.nightlyRate,
+        gstTarget.checkInAt,
+        gstTarget.checkOutAt,
+        gstTarget.otherExtras + serviceCharge,
+        clampDiscountPercent(
+          gstDiscountPercent !== "" ? gstDiscountPercent : gstTarget.discountPercent,
+        ),
+        {
+          taxPercent: pct,
+          taxAppliesToRoom: true,
+          taxAppliesToFood: false,
+        },
+      );
+      const total = bill.totalBill;
+      const amountPaid = gstTarget.amountPaid;
+      return {
+        subtotal: bill.roomChargesBefore + bill.extraCharges - serviceCharge,
+        serviceCharge,
+        gst: bill.taxAmount,
+        total,
+        amountPaid,
+        toCollect: roundMoney(Math.max(0, total - amountPaid)),
+      };
+    }
+    const subtotal = gstTarget.foodTotal;
+    const gst = pct > 0 ? roundMoney(((subtotal + serviceCharge) * pct) / 100) : 0;
+    const total = roundMoney(subtotal + serviceCharge + gst);
+    const amountPaid = gstTarget.amountPaid;
+    return {
+      subtotal,
+      serviceCharge,
+      gst,
+      total,
+      amountPaid,
+      toCollect: roundMoney(Math.max(0, total - amountPaid)),
+    };
+  }, [gstTarget, gstTaxRate, gstServiceCharge, gstDiscountPercent]);
+
+  function canApplyGst(inv: GuestInvoice) {
+    if (inv.type === "restaurant") return !inv.billClearedAt;
+    if (inv.type === "room") {
+      return inv.paymentTiming === "due_on_checkout" || inv.balanceDue > 0;
+    }
+    return false;
+  }
+
+  function openApplyGst(inv: GuestInvoice) {
+    setGstTarget(inv);
+    setGstTaxSelect(matchTaxSelect(inv, inv.type === "room"));
+    setGstServiceCharge(
+      inv.type === "restaurant" && inv.foodServiceCharge
+        ? String(inv.foodServiceCharge)
+        : "",
+    );
+    setGstDiscountPercent(
+      inv.type === "room" && inv.discountPercent > 0 ? String(inv.discountPercent) : "",
+    );
+    setGstBusy(false);
+  }
+
+  async function onConfirmApplyGst() {
+    if (!gstTarget) return;
+    if (gstTaxSelect === "none" || !gstTaxRate) {
+      toastError("Select a GST rate", "Choose a tax rate to apply before continuing.");
+      return;
+    }
+    setGstBusy(true);
+    try {
+      if (gstTarget.type === "room") {
+        const result = await applyRoomGst(gstTarget.checkInId, {
+          taxPercent: gstTaxRate.percent,
+          taxLabel: gstTaxRate.name,
+          taxRateId: gstTaxRate.id,
+          discountPercent: clampDiscountPercent(gstDiscountPercent),
+          serviceCharge: Number(gstServiceCharge) || 0,
+        });
+        toastSuccess(
+          "Room GST applied",
+          `${result.guestName} · Room ${result.roomNumber} — ${formatRs(result.gst, t.common.rs)} GST · ${formatRs(result.toCollect, t.common.rs)} to collect`,
+        );
+      } else {
+        const result = await applyGuestFoodGst(gstTarget.checkInId, {
+          taxPercent: gstTaxRate.percent,
+          taxLabel: gstTaxRate.name,
+          taxRateId: gstTaxRate.id,
+          serviceCharge: Number(gstServiceCharge) || 0,
+        });
+        toastSuccess(
+          "Food GST applied",
+          `${result.guestName} · Room ${result.roomNumber} — ${formatRs(result.foodTax, t.common.rs)} GST · ${formatRs(result.toCollect, t.common.rs)} to collect`,
+        );
+      }
+      setGstTarget(null);
+    } catch (err) {
+      toastError(
+        "Apply GST failed",
+        err instanceof Error ? err.message : "Could not apply GST to this bill.",
+      );
+    } finally {
+      setGstBusy(false);
+    }
+  }
 
   function openClearBill(inv: GuestInvoice) {
     setClearTarget(inv);
@@ -299,9 +473,15 @@ export function InvoicesPage() {
     setClearBankName("");
     setClearAccountName("");
     setClearAccountNumber("");
-    setClearTaxSelect("none");
-    setClearDiscountPercent("");
-    setClearServiceCharge("");
+    setClearTaxSelect(matchTaxSelect(inv, inv.type === "room"));
+    setClearDiscountPercent(
+      inv.type === "room" && inv.discountPercent > 0 ? String(inv.discountPercent) : "",
+    );
+    setClearServiceCharge(
+      inv.type === "restaurant" && inv.foodServiceCharge
+        ? String(inv.foodServiceCharge)
+        : "",
+    );
     setClearBusy(false);
   }
 
@@ -321,12 +501,22 @@ export function InvoicesPage() {
         setClearTarget(null);
         return;
       }
+      const taxPercent =
+        clearTaxSelect === "none"
+          ? 0
+          : (clearTaxRate?.percent ?? clearTarget.taxPercent);
+      const taxLabel = clearTaxRate?.name || clearTarget.taxLabel || undefined;
+      const taxRateId = clearTaxRate?.id ?? null;
       const result = clearTarget.type === "room"
         ? await clearRoomBill(clearTarget.checkInId, clearNeedsPaymentDetails ? {
-            discountPercent: clampDiscountPercent(clearDiscountPercent),
-            taxPercent: clearTaxRate?.percent ?? 0,
-            taxLabel: clearTaxRate?.name,
-            taxRateId: clearTaxRate?.id ?? null,
+            discountPercent: clampDiscountPercent(
+              clearDiscountPercent !== ""
+                ? clearDiscountPercent
+                : clearTarget.discountPercent,
+            ),
+            taxPercent,
+            taxLabel,
+            taxRateId,
             paymentMethod: clearPaymentMethod,
             serviceCharge: Number(clearServiceCharge) || 0,
             cardDetails:
@@ -343,16 +533,20 @@ export function InvoicesPage() {
                 : null,
           } : undefined)
         : await clearGuestFoodBill(clearTarget.checkInId, {
-            taxPercent: clearTaxRate?.percent ?? 0,
-            taxLabel: clearTaxRate?.name,
-            taxRateId: clearTaxRate?.id ?? null,
+            taxPercent,
+            taxLabel,
+            taxRateId,
             paymentMethod: clearPaymentMethod,
             serviceCharge: Number(clearServiceCharge) || 0,
           });
       const settledTotal = "totalBill" in result ? result.totalBill : result.folioTotal;
+      const collected =
+        "collected" in result
+          ? result.collected
+          : clearPreview.toCollect;
       toastSuccess(
         clearTarget.type === "room" ? "Room bill cleared" : "Food bill cleared",
-        `${result.guestName} · Room ${result.roomNumber} — ${formatRs(settledTotal, t.common.rs)} settled`,
+        `${result.guestName} · Room ${result.roomNumber} — collected ${formatRs(collected, t.common.rs)} (bill ${formatRs(settledTotal, t.common.rs)})`,
       );
       setClearTarget(null);
     } catch (err) {
@@ -714,6 +908,16 @@ export function InvoicesPage() {
                           + Misc
                         </Button>
                       ) : null}
+                      {canApplyGst(inv) ? (
+                        <Button
+                          size="sm"
+                          className="cursor-pointer whitespace-nowrap !bg-amber-600 !text-white hover:!bg-amber-500 shadow-xs"
+                          icon={<Percent className="h-3.5 w-3.5" />}
+                          onClick={() => openApplyGst(inv)}
+                        >
+                          {inv.taxPercent > 0 ? "Edit GST" : "Apply GST"}
+                        </Button>
+                      ) : null}
                       {inv.type !== "overall" &&
                       (status !== "paid" || (inv.type === "restaurant" && !inv.billClearedAt)) ? (
                         <Button
@@ -989,7 +1193,10 @@ export function InvoicesPage() {
                 {clearPreview.gst > 0 ? (
                   <div className="flex justify-between">
                     <span className="text-muted">
-                      {clearTaxRate?.name || "GST"} ({clearTaxRate?.percent ?? 0}%)
+                      {clearTaxRate?.name || clearTarget.taxLabel || "GST"}
+                      {(clearTaxRate?.percent ?? clearTarget.taxPercent) > 0
+                        ? ` (${clearTaxRate?.percent ?? clearTarget.taxPercent}%)`
+                        : ""}
                     </span>
                     <span className="font-semibold">
                       {formatRs(clearPreview.gst, t.common.rs)}
@@ -1001,9 +1208,157 @@ export function InvoicesPage() {
                     <span>{formatRs(0, t.common.rs)}</span>
                   </div>
                 )}
-                <div className="mt-2 flex justify-between border-t border-app pt-2 text-base font-extrabold">
-                  <span>Total to collect</span>
+                <div className="mt-2 flex justify-between border-t border-app pt-2 font-bold">
+                  <span>Total bill</span>
                   <span>{formatRs(clearPreview.total, t.common.rs)}</span>
+                </div>
+                <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
+                  <span className="font-medium">Already paid</span>
+                  <span className="font-semibold">
+                    {formatRs(clearPreview.amountPaid, t.common.rs)}
+                  </span>
+                </div>
+                <div className="flex justify-between rounded-lg bg-amber-500/10 px-2.5 py-2 text-base font-extrabold text-amber-800 dark:text-amber-200">
+                  <span>To collect</span>
+                  <span>{formatRs(clearPreview.toCollect, t.common.rs)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* ── Apply GST Modal ── */}
+      <Modal
+        open={Boolean(gstTarget)}
+        onClose={() => !gstBusy && setGstTarget(null)}
+        title={
+          gstTarget?.type === "room" ? "Apply Room GST" : "Apply Food GST"
+        }
+        subtitle={
+          gstTarget
+            ? `${gstTarget.guestName} · Room ${gstTarget.roomNumber} — ${
+                gstTarget.type === "room"
+                  ? "affects room bill & overall only"
+                  : "affects food bill & overall only"
+              }`
+            : undefined
+        }
+        wide
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              disabled={gstBusy}
+              onClick={() => setGstTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="cursor-pointer whitespace-nowrap !bg-amber-600 !text-white hover:!bg-amber-500 shadow-xs font-semibold"
+              icon={<Percent className="h-4 w-4" />}
+              disabled={gstBusy || gstTaxSelect === "none"}
+              onClick={() => void onConfirmApplyGst()}
+            >
+              {gstBusy ? "Applying…" : "Apply GST"}
+            </Button>
+          </>
+        }
+      >
+        {gstTarget ? (
+          <div className="space-y-5">
+            {gstTarget.type === "room" ? (
+              <div>
+                <label className="mb-2 block text-sm font-semibold">Room discount (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={gstDiscountPercent}
+                  onChange={(e) => setGstDiscountPercent(e.target.value)}
+                  placeholder="0"
+                  className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+                />
+                <p className="mt-2 text-xs text-muted">
+                  Optional. Applied to room price plus room GST.
+                </p>
+              </div>
+            ) : null}
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold">GST / Tax Rate</label>
+              <FancySelect
+                value={gstTaxSelect}
+                onChange={setGstTaxSelect}
+                options={gstTarget.type === "room" ? roomTaxOptions : foodTaxOptions}
+                placeholder="Select tax rate…"
+              />
+              <p className="mt-2 text-xs text-muted">
+                {gstTarget.type === "room"
+                  ? "GST applies to room charges (and room service charges). Food bill is unchanged."
+                  : "GST applies to food subtotal plus service charges. Room bill is unchanged."}
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold">Service charges</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={gstServiceCharge}
+                onChange={(e) => setGstServiceCharge(e.target.value)}
+                placeholder="0"
+                className="w-full rounded-xl border border-app bg-app px-3 py-2 text-sm"
+              />
+              <p className="mt-2 text-xs text-muted">
+                Optional. Included in the taxable base for this bill only.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-app bg-elevated p-4">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted">
+                After GST
+              </p>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted">
+                    {gstTarget.type === "room" ? "Room subtotal" : "Food subtotal"}
+                  </span>
+                  <span className="font-semibold">
+                    {formatRs(gstPreview.subtotal, t.common.rs)}
+                  </span>
+                </div>
+                {gstPreview.serviceCharge > 0 ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted">Service charges</span>
+                    <span className="font-semibold">
+                      {formatRs(gstPreview.serviceCharge, t.common.rs)}
+                    </span>
+                  </div>
+                ) : null}
+                <div className="flex justify-between">
+                  <span className="text-muted">
+                    {gstTaxRate ? `${gstTaxRate.name} (${gstTaxRate.percent}%)` : "GST"}
+                  </span>
+                  <span className="font-semibold">
+                    {formatRs(gstPreview.gst, t.common.rs)}
+                  </span>
+                </div>
+                <div className="mt-2 flex justify-between border-t border-app pt-2 font-bold">
+                  <span>Total bill</span>
+                  <span>{formatRs(gstPreview.total, t.common.rs)}</span>
+                </div>
+                <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
+                  <span className="font-medium">Already paid</span>
+                  <span className="font-semibold">
+                    {formatRs(gstPreview.amountPaid, t.common.rs)}
+                  </span>
+                </div>
+                <div className="flex justify-between rounded-lg bg-amber-500/10 px-2.5 py-2 text-base font-extrabold text-amber-800 dark:text-amber-200">
+                  <span>To collect</span>
+                  <span>{formatRs(gstPreview.toCollect, t.common.rs)}</span>
                 </div>
               </div>
             </div>

@@ -28,11 +28,13 @@ export interface RoomGuestInfo {
   cnicImageUrl?: string | null;
   cnicFrontImageUrl?: string | null;
   cnicBackImageUrl?: string | null;
+  guestPhotoUrl?: string | null;
   checkInId?: string;
   notes?: string;
   checkedInBy?: string;
   vehicleColor?: string;
   vehicleNumber?: string;
+  additionalDocumentUrls?: string[];
 }
 
 export interface RoomBookingInfo {

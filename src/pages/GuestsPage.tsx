@@ -352,6 +352,30 @@ export function GuestsPage() {
                 ) : null}
               </div>
             ) : null}
+            {viewRow.additionalDocumentUrls?.length ? (
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
+                  Additional documents
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {viewRow.additionalDocumentUrls.map((url, index) => (
+                    <a
+                      key={`guest-doc-${index}`}
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-block"
+                    >
+                      <img
+                        src={url}
+                        alt={`Document ${index + 1}`}
+                        className="h-28 w-full rounded-xl border border-app object-cover"
+                      />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </Modal>

@@ -141,6 +141,11 @@ function mapCheckIn(id: string, data: Record<string, unknown>): CheckInRecord {
         ? String(data.cnicImageUrl)
         : null,
     cnicBackImageUrl: data.cnicBackImageUrl ? String(data.cnicBackImageUrl) : null,
+    additionalDocumentUrls: Array.isArray(data.additionalDocumentUrls)
+      ? (data.additionalDocumentUrls as unknown[])
+          .map((u) => String(u ?? "").trim())
+          .filter(Boolean)
+      : [],
     notes: String(data.notes ?? ""),
     checkedInBy: String(data.checkedInBy ?? ""),
     vehicleColor: String(data.vehicleColor ?? ""),
@@ -251,6 +256,7 @@ export async function createCheckIn(input: {
   cnicFrontImageUrl?: string | null;
   cnicBackImageUrl?: string | null;
   guestPhotoUrl?: string | null;
+  additionalDocumentUrls?: string[];
   email?: string;
   notes: string;
   checkedInBy?: string;
@@ -303,6 +309,9 @@ export async function createCheckIn(input: {
   const cnicFront =
     input.cnicFrontImageUrl ?? input.cnicImageUrl ?? null;
   const cnicBack = input.cnicBackImageUrl ?? null;
+  const additionalDocumentUrls = (input.additionalDocumentUrls ?? [])
+    .map((u) => String(u ?? "").trim())
+    .filter(Boolean);
 
   const checkInRef = await addDoc(collection(db, "checkIns"), {
     roomId: input.roomId,
@@ -323,6 +332,7 @@ export async function createCheckIn(input: {
     cnicImageUrl: cnicFront,
     cnicFrontImageUrl: cnicFront,
     cnicBackImageUrl: cnicBack,
+    additionalDocumentUrls,
     notes: input.notes.trim(),
     checkedInBy: (input.checkedInBy ?? "").trim(),
     vehicleColor: (input.vehicleColor ?? "").trim(),
@@ -381,6 +391,7 @@ export async function createCheckIn(input: {
       cnicImageUrl: cnicFront,
       cnicFrontImageUrl: cnicFront,
       cnicBackImageUrl: cnicBack,
+      additionalDocumentUrls,
       checkInId: checkInRef.id,
       notes: input.notes.trim(),
       checkedInBy: (input.checkedInBy ?? "").trim(),
@@ -417,6 +428,7 @@ export async function updateCheckIn(
     cnicFrontImageUrl?: string | null;
     cnicBackImageUrl?: string | null;
     guestPhotoUrl?: string | null;
+    additionalDocumentUrls?: string[];
     email?: string;
     checkedInBy?: string;
     vehicleColor?: string;
@@ -533,6 +545,11 @@ export async function updateCheckIn(
   if (cnicBack !== undefined) {
     patch.cnicBackImageUrl = cnicBack;
   }
+  if (input.additionalDocumentUrls !== undefined) {
+    patch.additionalDocumentUrls = input.additionalDocumentUrls
+      .map((u) => String(u ?? "").trim())
+      .filter(Boolean);
+  }
 
   if (existingData?.status === "checked_in") {
     patch.paymentTiming = split.paymentTiming;
@@ -572,6 +589,13 @@ export async function updateCheckIn(
         ? { cnicImageUrl: cnicFront, cnicFrontImageUrl: cnicFront }
         : {}),
       ...(cnicBack !== undefined ? { cnicBackImageUrl: cnicBack } : {}),
+      ...(input.additionalDocumentUrls !== undefined
+        ? {
+            additionalDocumentUrls: input.additionalDocumentUrls
+              .map((u) => String(u ?? "").trim())
+              .filter(Boolean),
+          }
+        : {}),
     },
     updatedAt: serverTimestamp(),
   });
@@ -1001,80 +1025,115 @@ export async function cancelCheckIn(id: string) {
 }
 
 /**
- * Apply / update sales tax when food is ordered from the counter.
- * Enables food GST; does not turn on room GST if the stay had no tax yet.
+ * Apply / update GST on the room folio only (due-on-checkout / unpaid room bills).
+ * Does not settle payment and does not change food tax fields.
  */
-export async function applyStayFoodTax(
-  checkInId: string,
+export async function applyRoomGst(
+  id: string,
   input: {
     taxPercent: number;
     taxLabel?: string;
     taxRateId?: string | null;
+    discountPercent?: number;
+    serviceCharge?: number;
   },
 ) {
   if (!auth.currentUser) throw new Error("You must be signed in.");
-  const percent = Math.max(0, Math.min(100, Number(input.taxPercent) || 0));
-  if (percent <= 0) return;
 
-  const ref = doc(db, "checkIns", checkInId);
+  const ref = doc(db, "checkIns", id);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error("Check-in not found.");
   const data = snap.data();
-  if (data.status !== "checked_in") {
-    throw new Error("Guest is not checked in.");
+  if (data.status === "cancelled") {
+    throw new Error("This stay was cancelled.");
+  }
+  if (data.roomBillClearedAt) {
+    throw new Error("Room bill is already cleared. GST can’t be changed.");
   }
 
-  const prevPercent = Number(data.taxPercent ?? 0) || 0;
-  const patch: Record<string, unknown> = {
-    taxPercent: percent,
-    taxLabel: (input.taxLabel ?? "").trim() || `GST ${percent}%`,
-    taxRateId: input.taxRateId ?? null,
-    taxAppliesToFood: true,
-    updatedAt: serverTimestamp(),
-  };
-  // First time enabling tax from food counter — keep room untaxed unless already taxed
-  if (prevPercent <= 0) {
-    patch.taxAppliesToRoom = false;
-  }
+  const ordersSnap = await getDocs(
+    query(collection(db, "orders"), where("checkInId", "==", id)),
+  );
+  const foodSubtotal = roundMoney(
+    ordersSnap.docs.reduce((sum, order) => sum + (Number(order.data().amount) || 0), 0),
+  );
+  const foodTaxPercent = Number(data.foodTaxPercent ?? 0) || 0;
+  const foodServiceCharge = Math.max(0, Number(data.foodServiceCharge ?? 0) || 0);
+  const foodTax =
+    foodTaxPercent > 0
+      ? roundMoney(((foodSubtotal + foodServiceCharge) * foodTaxPercent) / 100)
+      : 0;
+  const foodPaid = data.foodBillClearedAt
+    ? roundMoney(foodSubtotal + foodServiceCharge + foodTax)
+    : ordersSnap.docs
+        .filter((order) => String(order.data().paymentStatus ?? "due") === "paid")
+        .reduce((sum, order) => sum + (Number(order.data().amount) || 0), 0);
 
-  const checkInAt = String(data.checkInAt ?? "");
-  const checkOutAt = String(data.checkOutAt ?? "");
-  const nightlyRate = Number(data.nightlyRate ?? 0);
-  const extraCharges = Number(data.extraCharges ?? 0);
+  const priorPaid = Math.max(0, Number(data.amountPaid ?? 0));
+  const roomPaidBefore = Math.max(0, priorPaid - foodPaid);
+  const serviceCharge = Math.max(0, Number(input.serviceCharge) || 0);
+  const roomExtraCharges =
+    Math.max(0, (Number(data.extraCharges ?? 0) || 0) - foodSubtotal) + serviceCharge;
+
+  const pct = Math.max(0, Math.min(100, Number(input.taxPercent) || 0));
+  const taxLabel =
+    (input.taxLabel ?? "").trim() || (pct > 0 ? `GST ${pct}%` : "");
+
   const bill = calcRoomBill(
-    nightlyRate,
-    checkInAt,
-    checkOutAt,
-    extraCharges,
-    clampDiscountPercent(data.discountPercent),
+    Number(data.nightlyRate ?? 0),
+    String(data.checkInAt ?? ""),
+    String(data.checkOutAt ?? ""),
+    roomExtraCharges,
+    clampDiscountPercent(
+      input.discountPercent != null ? input.discountPercent : data.discountPercent,
+    ),
     {
-      taxPercent: percent,
-      taxAppliesToRoom:
-        prevPercent <= 0 ? false : data.taxAppliesToRoom !== false,
-      taxAppliesToFood: true,
+      taxPercent: pct,
+      taxAppliesToRoom: true,
+      taxAppliesToFood: false,
     },
   );
 
-  Object.assign(patch, {
+  const roomTotal = bill.totalBill;
+  const toCollect = roundMoney(Math.max(0, roomTotal - roomPaidBefore));
+  const stayTotal = roundMoney(roomTotal + foodSubtotal + foodServiceCharge + foodTax);
+  const stayBalance = roundMoney(Math.max(0, stayTotal - priorPaid));
+  const paymentStatus: PaymentStatus =
+    stayBalance <= 0 ? "paid" : priorPaid > 0 ? "partial" : "due";
+
+  // Stay totalBill historically includes food extras; keep food pretax in extraCharges
+  // so room + food accounting stays consistent, without taxing food here.
+  await updateDoc(ref, {
+    nights: bill.nights,
+    roomCharges: bill.roomCharges,
     subtotal: bill.subtotal,
-    taxAmount: bill.taxAmount,
-    taxAppliesToRoom: bill.taxAppliesToRoom,
-    taxAppliesToFood: bill.taxAppliesToFood,
+    extraCharges: roomExtraCharges + foodSubtotal,
     discountPercent: bill.discountPercent,
     discountAmount: bill.discountAmount,
     discountedNightlyRate: bill.discountedNightlyRate,
-    roomCharges: bill.roomCharges,
-    nights: bill.nights,
-    totalBill: bill.totalBill,
+    taxRateId: input.taxRateId ?? null,
+    taxLabel,
+    taxPercent: bill.taxPercent,
+    taxAmount: bill.taxAmount,
+    taxAppliesToRoom: true,
+    // Do not flip food GST off/on — food folio uses foodTax* independently
+    taxAppliesToFood: data.taxAppliesToFood === true,
+    totalBill: stayTotal,
+    balanceDue: stayBalance,
+    paymentStatus,
+    updatedAt: serverTimestamp(),
   });
 
-  const amountPaid = Math.max(0, Number(data.amountPaid ?? 0));
-  const balanceDue = Math.max(0, bill.totalBill - amountPaid);
-  patch.balanceDue = balanceDue;
-  patch.paymentStatus =
-    balanceDue <= 0 ? "paid" : amountPaid > 0 ? "partial" : "due";
-
-  await updateDoc(ref, patch);
+  return {
+    guestName: String(data.guestName ?? ""),
+    roomNumber: String(data.roomNumber ?? ""),
+    subtotal: roundMoney(bill.roomChargesBefore + roomExtraCharges - serviceCharge),
+    serviceCharge,
+    gst: bill.taxAmount,
+    totalBill: roomTotal,
+    amountPaid: roomPaidBefore,
+    toCollect,
+  };
 }
 
 /**

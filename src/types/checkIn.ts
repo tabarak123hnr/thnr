@@ -56,6 +56,8 @@ export interface CheckInRecord {
   /** CNIC front / back images (cnicImageUrl kept as front for older records) */
   cnicFrontImageUrl: string | null;
   cnicBackImageUrl: string | null;
+  /** Extra ID / visa / supporting document photos (multiple) */
+  additionalDocumentUrls: string[];
   email: string;
   notes: string;
   /** Staff member who performed check-in */

@@ -263,17 +263,14 @@ export function buildFoodInvoice(
   const folioTotal = roundMoney(foodTotal + foodServiceCharge + taxAmount);
 
   const foodCleared = Boolean(row.foodBillClearedAt);
+  // Until the food bill is cleared, only cash actually collected counts as paid.
+  // GST / service added via Apply GST increases the total (and balance due), not amount paid.
   const foodPaidPretax = settled
     ? foodTotal
     : stayOrders
         .filter((o) => o.paymentStatus === "paid")
         .reduce((s, o) => s + (o.amount || 0), 0);
-  const foodPaid =
-    foodCleared || settled
-      ? folioTotal
-      : taxAmount > 0 && foodTotal > 0
-        ? roundMoney(foodPaidPretax + (foodPaidPretax / foodTotal) * taxAmount)
-        : foodPaidPretax;
+  const foodPaid = foodCleared || settled ? folioTotal : foodPaidPretax;
   const split = paymentFromSplit(folioTotal, foodPaid);
 
   let paymentTiming: PaymentTiming = "due_on_checkout";

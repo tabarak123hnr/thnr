@@ -320,6 +320,78 @@ export async function markOrderDelivered(id: string) {
 }
 
 /**
+ * Apply GST (and optional service charge) to the food folio only — does not settle/clear.
+ * Updates stay `foodTax*` fields so the food + overall invoices reflect tax; room is untouched.
+ */
+export async function applyGuestFoodGst(
+  checkInId: string,
+  input: {
+    taxPercent: number;
+    taxLabel?: string;
+    taxRateId?: string | null;
+    serviceCharge?: number;
+  },
+) {
+  if (!auth.currentUser) throw new Error("You must be signed in.");
+  if (!checkInId) throw new Error("Missing stay.");
+
+  const stayRef = doc(db, "checkIns", checkInId);
+  const staySnap = await getDoc(stayRef);
+  if (!staySnap.exists()) throw new Error("Check-in not found.");
+  const stay = staySnap.data();
+  if (stay.status === "cancelled") {
+    throw new Error("This stay was cancelled.");
+  }
+  if (stay.foodBillClearedAt) {
+    throw new Error("Food bill is already cleared. GST can’t be changed.");
+  }
+
+  const q = query(collection(db, "orders"), where("checkInId", "==", checkInId));
+  const orderSnap = await getDocs(q);
+  if (orderSnap.empty) throw new Error("No food orders on this stay.");
+
+  const orders = orderSnap.docs.map((d) =>
+    mapOrder(d.id, d.data() as Record<string, unknown>),
+  );
+  const foodSubtotal = roundMoney(orders.reduce((s, o) => s + (o.amount || 0), 0));
+  if (foodSubtotal <= 0) throw new Error("Food total is zero.");
+
+  const serviceCharge = Math.max(0, Number(input.serviceCharge) || 0);
+  const taxableSubtotal = roundMoney(foodSubtotal + serviceCharge);
+  const pct = Math.max(0, Math.min(100, Number(input.taxPercent) || 0));
+  const foodTax = pct > 0 ? roundMoney((taxableSubtotal * pct) / 100) : 0;
+  const folioTotal = roundMoney(taxableSubtotal + foodTax);
+  const taxLabel =
+    (input.taxLabel ?? "").trim() || (pct > 0 ? `GST ${pct}%` : "");
+
+  const paidPretax = roundMoney(
+    orders
+      .filter((o) => o.paymentStatus === "paid")
+      .reduce((s, o) => s + (o.amount || 0), 0),
+  );
+  const toCollect = roundMoney(Math.max(0, folioTotal - paidPretax));
+
+  await updateDoc(stayRef, {
+    foodTaxPercent: pct,
+    foodTaxLabel: taxLabel,
+    foodTaxRateId: input.taxRateId ?? null,
+    foodServiceCharge: serviceCharge,
+    updatedAt: serverTimestamp(),
+  });
+
+  return {
+    foodSubtotal,
+    serviceCharge,
+    foodTax,
+    folioTotal,
+    amountPaid: paidPretax,
+    toCollect,
+    guestName: String(stay.guestName ?? ""),
+    roomNumber: String(stay.roomNumber ?? ""),
+  };
+}
+
+/**
  * Settle the guest’s full food folio: one GST rate on total food, then mark tickets paid.
  */
 export async function clearGuestFoodBill(
