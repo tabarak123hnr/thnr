@@ -1,5 +1,7 @@
 import {
   BarChart3,
+  Info,
+  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
@@ -13,7 +15,7 @@ import { Button } from "../components/ui/Button";
 import { Card, CardHeader } from "../components/ui/Card";
 import { FancySelect } from "../components/ui/FancySelect";
 import { Modal } from "../components/ui/Modal";
-import { EmptyState, Field, Input, PageHeader, StatCard, TextArea } from "../components/ui/Page";
+import { EmptyState, Field, Input, PageHeader, TextArea } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
@@ -198,6 +200,99 @@ function SummaryTile({
       </p>
       <p className="mt-2 text-sm font-semibold">{label}</p>
       {hint ? <p className="mt-1 text-xs text-muted">{hint}</p> : null}
+    </div>
+  );
+}
+
+type InsightSegment = {
+  value: number;
+  label: string;
+  color: string;
+};
+
+function InsightPill({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-md border border-app bg-app px-2 py-0.5 text-[11px] font-medium text-muted">
+      {children}
+    </span>
+  );
+}
+
+function formatInsightAmount(value: number) {
+  const n = Math.round(Number(value) || 0);
+  return n.toLocaleString();
+}
+
+function InsightMetricCard({
+  title,
+  value,
+  accent,
+  badge,
+  segments,
+  hint,
+}: {
+  title: string;
+  value: string;
+  accent: string;
+  badge?: string;
+  segments: InsightSegment[];
+  hint?: string;
+}) {
+  const total = segments.reduce((s, seg) => s + Math.max(0, seg.value), 0);
+  const barTotal = total > 0 ? total : 1;
+
+  return (
+    <div className="surface rounded-2xl p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <p className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+            {title}
+          </p>
+          <span title={hint || title} className="inline-flex">
+            <Info className="h-3.5 w-3.5 shrink-0 text-muted" aria-hidden />
+          </span>
+        </div>
+        <MoreHorizontal className="h-4 w-4 shrink-0 text-muted" aria-hidden />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2.5">
+        <span className={cn("h-8 w-0.5 shrink-0 rounded-full", accent)} />
+        <p className="min-w-0 break-words text-2xl font-extrabold tracking-tight tabular-nums sm:text-[1.7rem]">
+          {value}
+        </p>
+        {badge ? <InsightPill>{badge}</InsightPill> : null}
+      </div>
+
+      <div className="mt-3.5 flex h-2 w-full overflow-hidden rounded-full bg-[color-mix(in_oklab,var(--border)_55%,transparent)]">
+        {total <= 0 ? (
+          <div className={cn("h-full w-full opacity-35", accent)} />
+        ) : (
+          segments.map((seg) => {
+            const width = (Math.max(0, seg.value) / barTotal) * 100;
+            if (width <= 0) return null;
+            return (
+              <div
+                key={`${seg.label}-${seg.color}`}
+                className={cn("h-full min-w-[2px]", seg.color)}
+                style={{ width: `${width}%` }}
+                title={`${seg.label}: ${formatInsightAmount(seg.value)}`}
+              />
+            );
+          })
+        )}
+      </div>
+
+      <ul className="mt-3 space-y-2">
+        {segments.map((seg) => (
+          <li key={`${seg.label}-row`} className="flex flex-wrap items-center gap-2.5">
+            <span className={cn("h-4 w-0.5 shrink-0 rounded-full", seg.color)} />
+            <span className="text-sm font-semibold tabular-nums">
+              {formatInsightAmount(seg.value)}
+            </span>
+            <InsightPill>{seg.label}</InsightPill>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -530,35 +625,96 @@ export function AccountsPage() {
         ))}
       </div>
 
-      <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard
-          label={a.revenue}
+      <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <InsightMetricCard
+          title={a.revenue}
           value={formatRs(snapshot.revenue, t.common.rs)}
+          accent="bg-emerald-500"
+          badge={a.statusTotal}
           hint={`${a.room}: ${formatRs(snapshot.roomRevenue, t.common.rs)} · ${a.food}: ${formatRs(snapshot.foodRevenue, t.common.rs)}`}
+          segments={[
+            {
+              value: snapshot.roomRevenue,
+              label: a.room,
+              color: "bg-emerald-500",
+            },
+            {
+              value: snapshot.foodRevenue,
+              label: a.food,
+              color: "bg-sky-500",
+            },
+          ]}
         />
-        <StatCard
-          label={a.expenditures}
-          value={formatRs(snapshot.expenditures, t.common.rs)}
-          hint={`${snapshot.expenseCount} ${a.entries}`}
+        <InsightMetricCard
+          title={a.expenditures}
+          value={formatRs(
+            snapshot.expenditures + snapshot.gaExpenditures,
+            t.common.rs,
+          )}
+          accent="bg-[var(--accent)]"
+          badge={`${snapshot.expenseCount + snapshot.gaCount} ${a.entries}`}
+          hint={`${snapshot.expenseCount + snapshot.gaCount} ${a.entries}`}
+          segments={[
+            {
+              value: snapshot.expenditures,
+              label: a.kindOperating,
+              color: "bg-[var(--accent)]",
+            },
+            {
+              value: snapshot.gaExpenditures,
+              label: a.kindGa,
+              color: "bg-amber-300 dark:bg-amber-500/70",
+            },
+          ]}
         />
-        <StatCard
-          label={a.gaExpenditures}
-          value={formatRs(snapshot.gaExpenditures, t.common.rs)}
-          hint={`${snapshot.gaCount} ${a.entries}`}
-        />
-        <StatCard
-          label={a.profit}
+        <InsightMetricCard
+          title={a.profit}
           value={formatRs(snapshot.profit, t.common.rs)}
+          accent={profitPositive ? "bg-emerald-500" : "bg-rose-500"}
+          badge={profitPositive ? a.statusProfit : a.statusLoss}
           hint={profitPositive ? a.profitHint : a.lossHint}
+          segments={[
+            {
+              value: Math.max(0, snapshot.revenue),
+              label: a.revenue,
+              color: "bg-emerald-500",
+            },
+            {
+              value: snapshot.expenditures + snapshot.gaExpenditures,
+              label: a.expenditures,
+              color: profitPositive
+                ? "bg-emerald-200 dark:bg-emerald-800"
+                : "bg-rose-400",
+            },
+          ]}
         />
-        <StatCard
-          label={a.outstanding}
+        <InsightMetricCard
+          title={a.outstanding}
           value={formatRs(snapshot.toBePaid, t.common.rs)}
-          hint={`${a.collected}: ${formatRs(snapshot.collected, t.common.rs)}${
-            snapshot.partialStayCount
-              ? ` · ${a.partials}: ${snapshot.partialStayCount}`
-              : ""
-          }`}
+          accent="bg-rose-500"
+          badge={a.statusDue}
+          hint={`${a.collected}: ${formatRs(snapshot.collected, t.common.rs)}`}
+          segments={[
+            {
+              value: snapshot.toBePaid,
+              label: a.toBePaid,
+              color: "bg-rose-500",
+            },
+            {
+              value: snapshot.collected,
+              label: a.collected,
+              color: "bg-zinc-300 dark:bg-zinc-600",
+            },
+            ...(snapshot.partialPaid > 0
+              ? [
+                  {
+                    value: snapshot.partialPaid,
+                    label: a.partials,
+                    color: "bg-[var(--accent)]",
+                  },
+                ]
+              : []),
+          ]}
         />
       </div>
 

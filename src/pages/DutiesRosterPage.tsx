@@ -146,6 +146,220 @@ function extraHousekeepingTasks(
   });
 }
 
+type DonutSegment = {
+  key: string;
+  label: string;
+  value: number;
+  color: string;
+  detail: string;
+};
+
+function PerformanceDonut({
+  centerValue,
+  centerLabel,
+  segments,
+  size = 168,
+  strokeWidth = 22,
+}: {
+  centerValue: string;
+  centerLabel: string;
+  segments: DonutSegment[];
+  size?: number;
+  strokeWidth?: number;
+}) {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const total = segments.reduce((sum, seg) => sum + Math.max(0, seg.value), 0);
+  const safeTotal = total > 0 ? total : 1;
+  let dashOffset = 0;
+
+  return (
+    <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:gap-8">
+      <div className="relative shrink-0" style={{ width: size, height: size }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="color-mix(in oklab, var(--border) 70%, transparent)"
+            strokeWidth={strokeWidth}
+          />
+          {total <= 0 ? (
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              stroke="color-mix(in oklab, var(--accent) 45%, transparent)"
+              strokeWidth={strokeWidth}
+              strokeDasharray={`${circumference * 0.28} ${circumference}`}
+              strokeLinecap="round"
+            />
+          ) : (
+            segments.map((seg) => {
+              const value = Math.max(0, seg.value);
+              if (value <= 0) return null;
+              const length = (value / safeTotal) * circumference;
+              const circle = (
+                <circle
+                  key={seg.key}
+                  cx={size / 2}
+                  cy={size / 2}
+                  r={radius}
+                  fill="none"
+                  stroke={seg.color}
+                  strokeWidth={strokeWidth}
+                  strokeDasharray={`${length} ${circumference - length}`}
+                  strokeDashoffset={-dashOffset}
+                  strokeLinecap="butt"
+                />
+              );
+              dashOffset += length;
+              return circle;
+            })
+          )}
+        </svg>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-4 text-center">
+          <p className="text-2xl font-extrabold tracking-tight tabular-nums sm:text-[1.7rem]">
+            {centerValue}
+          </p>
+          <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+            {centerLabel}
+          </p>
+        </div>
+      </div>
+
+      <ul className="w-full min-w-0 space-y-3.5 sm:max-w-xs">
+        {segments.map((seg) => {
+          const pct = total > 0 ? Math.round((Math.max(0, seg.value) / total) * 100) : 0;
+          return (
+            <li key={seg.key} className="flex items-start gap-2.5">
+              <span
+                className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: seg.color }}
+              />
+              <div className="min-w-0">
+                <p className="text-sm font-bold leading-tight">{seg.label}</p>
+                <p className="mt-0.5 text-xs text-muted">
+                  {seg.detail} ({pct}%)
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function performanceSegments(row: {
+  earnedPoints: number;
+  deductedPoints: number;
+  pendingPoints: number;
+  completed: number;
+  missed: number;
+  pending: number;
+}): DonutSegment[] {
+  return [
+    {
+      key: "completed",
+      label: "Completed",
+      value: row.earnedPoints,
+      color: "#16a34a",
+      detail: `${row.earnedPoints} pts · ${row.completed} done`,
+    },
+    {
+      key: "missed",
+      label: "Missed",
+      value: row.deductedPoints,
+      color: "#f43f5e",
+      detail: `${row.deductedPoints} pts · ${row.missed} missed`,
+    },
+    {
+      key: "pending",
+      label: "Open tasks",
+      value: row.pendingPoints,
+      color: "#d4af37",
+      detail: `${row.pendingPoints} pts · ${row.pending} open`,
+    },
+  ];
+}
+
+function MiniScoreRing({
+  score,
+  hasScoredTasks,
+  earnedPoints,
+  deductedPoints,
+  pendingPoints,
+}: {
+  score: number;
+  hasScoredTasks: boolean;
+  earnedPoints: number;
+  deductedPoints: number;
+  pendingPoints: number;
+}) {
+  const size = 44;
+  const strokeWidth = 5;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const segments = [
+    { value: earnedPoints, color: "#16a34a" },
+    { value: deductedPoints, color: "#f43f5e" },
+    { value: pendingPoints, color: "#d4af37" },
+  ];
+  const total = segments.reduce((s, x) => s + Math.max(0, x.value), 0);
+  const safeTotal = total > 0 ? total : 1;
+  let dashOffset = 0;
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="relative shrink-0" style={{ width: size, height: size }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="color-mix(in oklab, var(--border) 70%, transparent)"
+            strokeWidth={strokeWidth}
+          />
+          {total > 0
+            ? segments.map((seg, index) => {
+                const value = Math.max(0, seg.value);
+                if (value <= 0) return null;
+                const length = (value / safeTotal) * circumference;
+                const circle = (
+                  <circle
+                    key={index}
+                    cx={size / 2}
+                    cy={size / 2}
+                    r={radius}
+                    fill="none"
+                    stroke={seg.color}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={`${length} ${circumference - length}`}
+                    strokeDashoffset={-dashOffset}
+                  />
+                );
+                dashOffset += length;
+                return circle;
+              })
+            : null}
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-[10px] font-extrabold tabular-nums">
+            {hasScoredTasks ? score : "—"}
+          </span>
+        </div>
+      </div>
+      <span className="text-xs font-medium text-muted">
+        {hasScoredTasks ? `${score}%` : "Pending"}
+      </span>
+    </div>
+  );
+}
+
 function employeeOptions(employees: Employee[], emptyLabel = "Select employee") {
   const active = employees.filter((e) => e.status === "active");
   return [
@@ -362,6 +576,30 @@ export function DutiesRosterPage() {
         (row.designation || "").toLowerCase().includes(q),
     );
   }, [performance, search]);
+
+  const teamPerformance = useMemo(() => {
+    const earnedPoints = searchedPerformance.reduce((s, r) => s + r.earnedPoints, 0);
+    const deductedPoints = searchedPerformance.reduce((s, r) => s + r.deductedPoints, 0);
+    const pendingPoints = searchedPerformance.reduce((s, r) => s + r.pendingPoints, 0);
+    const completed = searchedPerformance.reduce((s, r) => s + r.completed, 0);
+    const missed = searchedPerformance.reduce((s, r) => s + r.missed, 0);
+    const pending = searchedPerformance.reduce((s, r) => s + r.pending, 0);
+    const scored = searchedPerformance.filter((r) => r.hasScoredTasks);
+    const avgScore = scored.length
+      ? Math.round(scored.reduce((s, r) => s + r.score, 0) / scored.length)
+      : 0;
+    return {
+      earnedPoints,
+      deductedPoints,
+      pendingPoints,
+      completed,
+      missed,
+      pending,
+      avgScore,
+      hasScoredTasks: scored.length > 0,
+      staffCount: searchedPerformance.length,
+    };
+  }, [searchedPerformance]);
 
   const performanceById = useMemo(() => {
     const map = new Map<string, ReturnType<typeof scoreEmployeeDuties>>();
@@ -712,9 +950,13 @@ export function DutiesRosterPage() {
                     title={group.name}
                     badge={
                       score ? (
-                        <Badge tone={scoreTone(score.score, score.hasScoredTasks)}>
-                          {score.hasScoredTasks ? `${score.score}%` : "Pending"}
-                        </Badge>
+                        <MiniScoreRing
+                          score={score.score}
+                          hasScoredTasks={score.hasScoredTasks}
+                          earnedPoints={score.earnedPoints}
+                          deductedPoints={score.deductedPoints}
+                          pendingPoints={score.pendingPoints}
+                        />
                       ) : null
                     }
                     action={
@@ -871,8 +1113,8 @@ export function DutiesRosterPage() {
       ) : null}
 
       {tab === "performance" ? (
-        <div>
-          <div className="mb-4 flex flex-wrap items-end gap-3">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-end gap-3">
             <div className="w-full sm:w-44">
               <Field label="Period">
                 <FancySelect
@@ -910,51 +1152,76 @@ export function DutiesRosterPage() {
               </Field>
             </div>
           </div>
+
           <Card>
-            <Table
-              headers={["Employee", "Done / assigned", "Earned", "Deducted", "Score"]}
-              colWidths={["28%", "18%", "16%", "16%", "22%"]}
-            >
-              {searchedPerformance.length === 0 ? (
-                <Tr>
-                  <Td className="text-muted" colSpan={5}>
-                    {search
-                      ? "No employees match your search."
-                      : "Add employees to track daily task scores."}
-                  </Td>
-                </Tr>
-              ) : (
-                searchedPerformance.map((row) => (
-                  <Tr key={row.employeeId}>
-                    <Td>
-                      <p className="font-semibold">{row.employeeName}</p>
-                      <p className="mt-0.5 text-xs text-muted">
-                        {row.designation || "Staff"}
-                        {row.pending ? ` · ${row.pending} still open` : ""}
-                      </p>
-                    </Td>
-                    <Td>
-                      {row.completed}/{row.assigned || 0}
-                      {row.missed ? (
-                        <span className="mt-0.5 block text-xs text-muted">
-                          {row.missed} missed
-                        </span>
-                      ) : null}
-                    </Td>
-                    <Td className="font-semibold">+{row.earnedPoints}</Td>
-                    <Td className="font-semibold text-red-600 dark:text-red-400">
-                      −{row.deductedPoints}
-                    </Td>
-                    <Td>
-                      <Badge tone={scoreTone(row.score, row.hasScoredTasks)}>
-                        {row.hasScoredTasks ? `${row.score}% · ${row.label}` : row.label}
-                      </Badge>
-                    </Td>
-                  </Tr>
-                ))
-              )}
-            </Table>
+            <CardHeader
+              title="Team performance"
+              badge={
+                <Badge tone={scoreTone(teamPerformance.avgScore, teamPerformance.hasScoredTasks)}>
+                  {teamPerformance.hasScoredTasks
+                    ? teamPerformance.avgScore >= 90
+                      ? "Excellent"
+                      : teamPerformance.avgScore >= 75
+                        ? "Good"
+                        : teamPerformance.avgScore >= 50
+                          ? "Fair"
+                          : "Needs improvement"
+                    : "No scored tasks"}
+                </Badge>
+              }
+            />
+            <p className="mb-5 text-sm text-muted">
+              Average score across {teamPerformance.staffCount} staff for this period.
+              Points come from completed, missed, and still-open duties.
+            </p>
+            <PerformanceDonut
+              centerValue={
+                teamPerformance.hasScoredTasks ? `${teamPerformance.avgScore}%` : "—"
+              }
+              centerLabel="Avg score"
+              size={188}
+              strokeWidth={24}
+              segments={performanceSegments(teamPerformance)}
+            />
           </Card>
+
+          {searchedPerformance.length === 0 ? (
+            <Card>
+              <p className="py-10 text-center text-sm text-muted">
+                {search
+                  ? "No employees match your search."
+                  : "Add employees to track daily task scores."}
+              </p>
+            </Card>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {searchedPerformance.map((row) => (
+                <Card key={row.employeeId}>
+                  <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-base font-extrabold tracking-tight">
+                        {row.employeeName}
+                      </p>
+                      <p className="mt-0.5 text-sm text-muted">
+                        {row.designation || "Staff"}
+                        {" · "}
+                        {row.completed}/{row.assigned || 0} done
+                        {row.pending ? ` · ${row.pending} open` : ""}
+                      </p>
+                    </div>
+                    <Badge tone={scoreTone(row.score, row.hasScoredTasks)}>
+                      {row.label}
+                    </Badge>
+                  </div>
+                  <PerformanceDonut
+                    centerValue={row.hasScoredTasks ? `${row.score}%` : "—"}
+                    centerLabel="Score"
+                    segments={performanceSegments(row)}
+                  />
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -1057,11 +1324,13 @@ export function DutiesRosterPage() {
                       </Td>
                       <Td bordered>
                         {score ? (
-                          <Badge tone={scoreTone(score.score, score.hasScoredTasks)}>
-                            {score.hasScoredTasks
-                              ? `${score.score}% · ${score.label}`
-                              : score.label}
-                          </Badge>
+                          <MiniScoreRing
+                            score={score.score}
+                            hasScoredTasks={score.hasScoredTasks}
+                            earnedPoints={score.earnedPoints}
+                            deductedPoints={score.deductedPoints}
+                            pendingPoints={score.pendingPoints}
+                          />
                         ) : (
                           <span className="text-muted">—</span>
                         )}

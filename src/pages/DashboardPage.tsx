@@ -1,11 +1,17 @@
-import { ArrowUpRight, Eye } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowUpRight,
+  BedDouble,
+  Eye,
+  LogOut,
+  Users,
+  Wallet,
+} from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardHeader } from "../components/ui/Card";
-import { EmptyState, PageHeader, StatCard } from "../components/ui/Page";
-import { Table, Td, Tr } from "../components/ui/Table";
+import { EmptyState, PageHeader } from "../components/ui/Page";
 import { useApp } from "../context/app-context";
 import {
   buildOpsNotifications,
@@ -48,6 +54,22 @@ function isSameCalendarDay(isoOrMs: string | number, dayStart: number) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() === dayStart;
 }
 
+function toIsoDate(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function lastNDays(n: number, now = new Date()) {
+  const days: Date[] = [];
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    days.push(d);
+  }
+  return days;
+}
+
 function formatShortWhen(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
@@ -82,6 +104,294 @@ const dutyStatusOrder: Record<DutyStatus, number> = {
   completed: 3,
   cancelled: 4,
 };
+
+function MetricCard({
+  label,
+  value,
+  icon,
+  featured = false,
+  hint,
+}: {
+  label: string;
+  value: string;
+  icon: ReactNode;
+  featured?: boolean;
+  hint?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-2xl p-4 sm:p-5",
+        featured
+          ? "bg-[var(--text)] text-[var(--bg)] shadow-[var(--shadow)]"
+          : "surface",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p
+          className={cn(
+            "text-sm font-medium",
+            featured ? "text-white/70 dark:text-black/60" : "text-muted",
+          )}
+        >
+          {label}
+        </p>
+        <span
+          className={cn(
+            "flex h-9 w-9 items-center justify-center rounded-full",
+            featured
+              ? "bg-white/15 text-white dark:bg-black/10 dark:text-black"
+              : "bg-accent-soft text-[var(--accent)]",
+          )}
+        >
+          {icon}
+        </span>
+      </div>
+      <p className="mt-4 text-3xl font-extrabold tracking-tight tabular-nums">
+        {value}
+      </p>
+      {hint ? (
+        <p
+          className={cn(
+            "mt-1 text-xs",
+            featured ? "text-white/55 dark:text-black/50" : "text-muted",
+          )}
+        >
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function OccupancyDonut({
+  percent,
+  occupied,
+  total,
+}: {
+  percent: number;
+  occupied: number;
+  total: number;
+}) {
+  const size = 168;
+  const strokeWidth = 18;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const filled = Math.max(0, Math.min(100, percent));
+  const dash = (filled / 100) * circumference;
+
+  return (
+    <div className="relative mx-auto" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="var(--text)"
+          strokeWidth={strokeWidth}
+          opacity={0.12}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={strokeWidth}
+          strokeDasharray={`${dash} ${circumference - dash}`}
+          strokeLinecap="round"
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+        <p className="text-3xl font-extrabold tracking-tight tabular-nums">{percent}%</p>
+        <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+          Occupied
+        </p>
+        <p className="mt-1 text-xs text-muted">
+          {occupied}/{total || 0}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function GroupedBarChart({
+  points,
+}: {
+  points: { label: string; room: number; food: number }[];
+}) {
+  const max = Math.max(...points.flatMap((p) => [p.room, p.food]), 1);
+  const tip = [...points].reverse().find((p) => p.room > 0 || p.food > 0) || points[points.length - 1];
+
+  return (
+    <div className="relative pt-8">
+      {tip ? (
+        <div
+          className="pointer-events-none absolute top-0 z-10 rounded-lg bg-[var(--text)] px-2.5 py-1 text-[11px] font-bold text-[var(--bg)] shadow"
+          style={{
+            left: `${(points.indexOf(tip) / Math.max(points.length - 1, 1)) * 100}%`,
+            transform: "translateX(-50%)",
+          }}
+        >
+          {formatRs(tip.room + tip.food)}
+          <span className="absolute start-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[var(--text)]" />
+        </div>
+      ) : null}
+
+      <div className="flex h-48 items-end gap-2 sm:gap-3">
+        {points.map((p) => {
+          const roomH = Math.max(p.room > 0 ? 8 : 0, Math.round((p.room / max) * 100));
+          const foodH = Math.max(p.food > 0 ? 8 : 0, Math.round((p.food / max) * 100));
+          return (
+            <div key={p.label} className="flex min-w-0 flex-1 flex-col items-center gap-2">
+              <div className="flex h-40 w-full items-end justify-center gap-1">
+                <div
+                  className="w-[42%] max-w-5 rounded-t-md bg-[var(--text)] transition-all"
+                  style={{ height: `${roomH}%` }}
+                  title={`Rooms ${formatRs(p.room)}`}
+                />
+                <div
+                  className="w-[42%] max-w-5 rounded-t-md bg-[var(--accent)] transition-all"
+                  style={{ height: `${foodH}%` }}
+                  title={`Food ${formatRs(p.food)}`}
+                />
+              </div>
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                {p.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-muted">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-[var(--text)]" /> Rooms
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-[var(--accent)]" /> Food
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function AreaSpark({
+  seriesA,
+  seriesB,
+}: {
+  seriesA: number[];
+  seriesB: number[];
+}) {
+  const w = 320;
+  const h = 120;
+  const max = Math.max(...seriesA, ...seriesB, 1);
+  const toPoints = (values: number[]) =>
+    values
+      .map((v, i) => {
+        const x = values.length <= 1 ? 0 : (i / (values.length - 1)) * w;
+        const y = h - (v / max) * (h - 12) - 6;
+        return `${x},${y}`;
+      })
+      .join(" ");
+
+  const areaPath = (values: number[]) => {
+    if (!values.length) return "";
+    const line = values
+      .map((v, i) => {
+        const x = values.length <= 1 ? 0 : (i / (values.length - 1)) * w;
+        const y = h - (v / max) * (h - 12) - 6;
+        return `${i === 0 ? "M" : "L"}${x} ${y}`;
+      })
+      .join(" ");
+    return `${line} L ${w} ${h} L 0 ${h} Z`;
+  };
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="h-32 w-full" preserveAspectRatio="none">
+      <path d={areaPath(seriesA)} fill="color-mix(in oklab, var(--text) 18%, transparent)" />
+      <path d={areaPath(seriesB)} fill="color-mix(in oklab, var(--accent) 28%, transparent)" />
+      <polyline
+        points={toPoints(seriesA)}
+        fill="none"
+        stroke="var(--text)"
+        strokeWidth="2.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      <polyline
+        points={toPoints(seriesB)}
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth="2.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function MonthCalendar({
+  arrivalDays,
+  departureDays,
+}: {
+  arrivalDays: Set<number>;
+  departureDays: Set<number>;
+}) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const firstDow = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today = now.getDate();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDow; i += 1) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d += 1) cells.push(d);
+
+  return (
+    <div className="min-w-[148px]">
+      <p className="mb-2 text-center text-xs font-bold uppercase tracking-wide">
+        {now.toLocaleString(undefined, { month: "short", year: "numeric" })}
+      </p>
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-muted">
+        {["S", "M", "T", "W", "T", "F", "S"].map((d) => (
+          <span key={d}>{d}</span>
+        ))}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {cells.map((day, idx) => {
+          if (day == null) return <span key={`e-${idx}`} />;
+          const isArrival = arrivalDays.has(day);
+          const isDeparture = departureDays.has(day);
+          const isToday = day === today;
+          return (
+            <span
+              key={day}
+              className={cn(
+                "flex h-6 items-center justify-center rounded-md text-[11px] font-semibold tabular-nums",
+                isToday && "ring-1 ring-[var(--accent)]",
+                isArrival && "bg-[var(--accent)] text-[var(--accent-text)]",
+                !isArrival && isDeparture && "bg-[var(--text)] text-[var(--bg)]",
+                !isArrival && !isDeparture && "text-muted",
+              )}
+            >
+              {day}
+            </span>
+          );
+        })}
+      </div>
+      <div className="mt-3 space-y-1 text-[10px] text-muted">
+        <p className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-sm bg-[var(--accent)]" /> Arrivals
+        </p>
+        <p className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-sm bg-[var(--text)]" /> Departures
+        </p>
+      </div>
+    </div>
+  );
+}
 
 export function DashboardPage() {
   const { t, language } = useApp();
@@ -160,7 +470,7 @@ export function DashboardPage() {
     return orders
       .filter((o) => o.status === "pending")
       .sort((a, b) => tsMs(a.createdAt) - tsMs(b.createdAt))
-      .slice(0, 6)
+      .slice(0, 5)
       .map((o) => {
         const placed = tsMs(o.createdAt) || nowMs;
         const ageMinutes = Math.max(0, Math.floor((nowMs - placed) / 60000));
@@ -170,7 +480,6 @@ export function DashboardPage() {
 
   const attentionItems = useMemo(() => {
     void tick;
-    // Prefer dirty rooms + top actionable ops alerts
     const dirty = rooms
       .filter((r) => r.cleaningStatus === "dirty")
       .map((r) => ({
@@ -206,14 +515,13 @@ export function DashboardPage() {
           | "warning",
       }));
 
-    // Dirty rooms first, then other alerts (dedupe by id)
     const seen = new Set<string>();
     const merged = [...dirty, ...alerts].filter((item) => {
       if (seen.has(item.id)) return false;
       seen.add(item.id);
       return true;
     });
-    return merged.slice(0, 8);
+    return merged.slice(0, 4);
   }, [rooms, checkIns, orders, tasks, bookings, tick, nowMs, t.common.rs]);
 
   const arrivalsToday = useMemo(() => {
@@ -236,9 +544,6 @@ export function DashboardPage() {
       isSameCalendarDay(tsMs(o.createdAt), dayStart),
     );
     const foodTotal = ordersToday.reduce((s, o) => s + (o.amount || 0), 0);
-    const foodPaid = ordersToday
-      .filter((o) => o.paymentStatus === "paid")
-      .reduce((s, o) => s + (o.amount || 0), 0);
 
     const checkedOutToday = checkIns.filter(
       (c) =>
@@ -250,16 +555,71 @@ export function DashboardPage() {
       0,
     );
 
-    const total = roomTotal + foodTotal;
     return {
       rooms: roomTotal,
       restaurant: foodTotal,
-      roomService: foodPaid,
-      total,
+      total: roomTotal + foodTotal,
       checkOutCount: checkedOutToday.length,
       orderCount: ordersToday.length,
     };
   }, [orders, checkIns, dayStart]);
+
+  const weekSeries = useMemo(() => {
+    const days = lastNDays(7);
+    return days.map((d) => {
+      const start = startOfDayMs(d);
+      const label = d.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 3);
+      const room = checkIns
+        .filter(
+          (c) =>
+            c.status === "checked_out" &&
+            isSameCalendarDay(tsMs(c.checkedOutAt) || c.checkOutAt, start),
+        )
+        .reduce((s, c) => s + Math.max(0, Number(c.roomCharges) || 0), 0);
+      const food = orders
+        .filter((o) => isSameCalendarDay(tsMs(o.createdAt), start))
+        .reduce((s, o) => s + Math.max(0, o.amount || 0), 0);
+      const checkouts = checkIns.filter(
+        (c) =>
+          c.status === "checked_out" &&
+          isSameCalendarDay(tsMs(c.checkedOutAt) || c.checkOutAt, start),
+      ).length;
+      const orderCount = orders.filter((o) =>
+        isSameCalendarDay(tsMs(o.createdAt), start),
+      ).length;
+      return { label, room, food, checkouts, orderCount, iso: toIsoDate(d) };
+    });
+  }, [checkIns, orders]);
+
+  const calendarMarks = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const arrivalDays = new Set<number>();
+    const departureDays = new Set<number>();
+
+    for (const b of bookings) {
+      if (
+        b.status !== "pending" &&
+        b.status !== "confirmed" &&
+        b.status !== "reserved"
+      ) {
+        continue;
+      }
+      const d = new Date(b.checkInAt);
+      if (d.getFullYear() === year && d.getMonth() === month) {
+        arrivalDays.add(d.getDate());
+      }
+    }
+    for (const c of checkIns) {
+      if (c.status !== "checked_in") continue;
+      const d = new Date(c.checkOutAt);
+      if (d.getFullYear() === year && d.getMonth() === month) {
+        departureDays.add(d.getDate());
+      }
+    }
+    return { arrivalDays, departureDays };
+  }, [bookings, checkIns]);
 
   const todaysDuties = useMemo(() => {
     const today = todayIsoDate();
@@ -271,18 +631,14 @@ export function DashboardPage() {
         const byName = (a.assigneeName || "zzz").localeCompare(b.assigneeName || "zzz");
         if (byName !== 0) return byName;
         return a.title.localeCompare(b.title);
-      });
+      })
+      .slice(0, 6);
   }, [duties, tick]);
 
   const occPct =
     kpis.totalRooms > 0
       ? Math.round((kpis.occupied / kpis.totalRooms) * 100)
       : 0;
-
-  function barWidth(value: number) {
-    if (!revenue.total) return 0;
-    return Math.max(4, Math.round((value / revenue.total) * 100));
-  }
 
   return (
     <div>
@@ -291,67 +647,155 @@ export function DashboardPage() {
         subtitle={t.todaySub}
         actions={
           <>
-            <Link to="/check-in" className="w-full md:hidden sm:w-auto">
+            <Link to="/check-in" className="w-full sm:w-auto">
               <Button className="w-full sm:w-auto">{t.newCheckIn}</Button>
             </Link>
-            <Link to="/counter" className="w-full md:hidden sm:w-auto">
+            <Link to="/counter" className="w-full sm:w-auto">
               <Button variant="secondary" className="w-full sm:w-auto">
                 {t.newOrder}
               </Button>
             </Link>
+            <a
+              href="https://hoteleye.punjab.gov.pk/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full sm:w-auto"
+            >
+              <Button variant="secondary" className="w-full sm:w-auto">
+                <Eye className="h-4 w-4" />
+                Hotel Eye
+              </Button>
+            </a>
           </>
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          featured
+          label={t.revenueToday}
+          value={formatRs(revenue.total, t.common.rs)}
+          hint={`${revenue.checkOutCount} checkout · ${revenue.orderCount} orders`}
+          icon={<Wallet className="h-4 w-4" />}
+        />
+        <MetricCard
           label={t.arriving}
           value={String(kpis.arriving)}
           hint={t.expectedToday}
+          icon={<Users className="h-4 w-4" />}
         />
-        <StatCard
-          label={t.departing}
-          value={String(kpis.departing)}
-          hint={`${kpis.departingOverdue} ${t.overdue}`}
-          alert={kpis.departingOverdue || undefined}
-        />
-        <StatCard
+        <MetricCard
           label={t.occupied}
           value={
             kpis.totalRooms
               ? `${kpis.occupied}/${kpis.totalRooms}`
               : String(kpis.occupied)
           }
-          hint={`${occPct}%`}
-          badge={<Badge tone="info">{t.live}</Badge>}
+          hint={`${occPct}% ${t.live}`}
+          icon={<BedDouble className="h-4 w-4" />}
         />
-        <StatCard
-          label={t.revenueToday}
-          value={formatRs(revenue.total, t.common.rs)}
-          hint={t.roomsPlusRestaurant}
+        <MetricCard
+          label={t.departing}
+          value={String(kpis.departing)}
+          hint={
+            kpis.departingOverdue
+              ? `${kpis.departingOverdue} ${t.overdue}`
+              : t.expectedToday
+          }
+          icon={<LogOut className="h-4 w-4" />}
         />
-        <a
-          href="https://hoteleye.punjab.gov.pk/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="surface group relative rounded-2xl p-4 transition-all hover:border-sky-300 hover:bg-sky-50 sm:p-5 dark:hover:border-sky-800 dark:hover:bg-sky-950/50"
-          title="Open Hotel Eye - Punjab Police Portal"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <p className="text-sm font-medium text-muted">Hotel Eye</p>
-            <Eye className="h-6 w-6 shrink-0 text-sky-600 dark:text-sky-400" />
-          </div>
-          <p className="mt-2 text-2xl font-extrabold tracking-tight sm:text-3xl">
-            Open portal
-          </p>
-          <p className="mt-1 inline-flex items-center gap-1 text-xs text-muted">
-            Punjab Police
-            <ArrowUpRight className="h-3.5 w-3.5" />
-          </p>
-        </a>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[1.55fr_1fr]">
+        <Card>
+          <CardHeader
+            title="Results"
+            action={
+              <Link to="/accounts">
+                <Button size="sm" variant="gold">
+                  Check now
+                </Button>
+              </Link>
+            }
+          />
+          <p className="mb-2 text-sm text-muted">
+            Room vs food revenue for the last 7 days.
+          </p>
+          <GroupedBarChart points={weekSeries} />
+        </Card>
+
+        <Card className="flex flex-col">
+          <CardHeader title={t.occupied} badge={<Badge tone="info">{t.live}</Badge>} />
+          <OccupancyDonut
+            percent={occPct}
+            occupied={kpis.occupied}
+            total={kpis.totalRooms}
+          />
+          <ul className="mt-5 divide-y divide-[color-mix(in_oklab,var(--border)_85%,transparent)]">
+            {attentionItems.length === 0 ? (
+              <li className="py-3 text-sm text-muted">
+                Nothing urgent — dirty rooms and overdue items show here.
+              </li>
+            ) : (
+              attentionItems.map((item) => (
+                <li key={item.id}>
+                  <Link
+                    to={item.href}
+                    className="flex items-start justify-between gap-3 py-3 hover:opacity-90"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{item.title}</p>
+                      <p className="mt-0.5 truncate text-xs text-muted">{item.detail}</p>
+                    </div>
+                    <span className="shrink-0 text-[11px] text-muted">{item.age}</span>
+                  </Link>
+                </li>
+              ))
+            )}
+          </ul>
+          <Link to="/notifications" className="mt-auto pt-4">
+            <Button variant="gold" className="w-full">
+              Check now
+              <ArrowUpRight className="h-4 w-4" />
+            </Button>
+          </Link>
+        </Card>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[1.55fr_1fr]">
+        <Card>
+          <CardHeader
+            title="Activity"
+            action={
+              <div className="flex flex-wrap gap-3 text-xs text-muted">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-[var(--text)]" /> Checkouts
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-[var(--accent)]" /> Orders
+                </span>
+              </div>
+            }
+          />
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+            <div className="min-w-0 flex-1">
+              <AreaSpark
+                seriesA={weekSeries.map((d) => d.checkouts)}
+                seriesB={weekSeries.map((d) => d.orderCount)}
+              />
+              <div className="mt-2 flex justify-between text-[10px] font-semibold uppercase tracking-wide text-muted">
+                {weekSeries.map((d) => (
+                  <span key={d.iso}>{d.label}</span>
+                ))}
+              </div>
+            </div>
+            <MonthCalendar
+              arrivalDays={calendarMarks.arrivalDays}
+              departureDays={calendarMarks.departureDays}
+            />
+          </div>
+        </Card>
+
         <Card>
           <CardHeader
             title={t.liveOrders}
@@ -368,17 +812,20 @@ export function DashboardPage() {
           {liveOrders.length === 0 ? (
             <EmptyState message="No active kitchen orders right now." />
           ) : (
-            <Table headers={[t.token, t.from, t.items, t.status, t.age]}>
+            <ul className="space-y-3">
               {liveOrders.map((order) => (
-                <Tr key={order.id}>
-                  <Td>
-                    <span className="font-bold">{order.token}</span>
-                  </Td>
-                  <Td>
-                    <Badge tone="warning">Room {order.roomNumber}</Badge>
-                  </Td>
-                  <Td className="max-w-[240px]">
-                    <span className="line-clamp-2 text-[var(--text-muted)]">
+                <li
+                  key={order.id}
+                  className="flex items-start justify-between gap-3 rounded-xl border border-app bg-app px-3 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <p className="font-bold">
+                      {order.token}{" "}
+                      <span className="font-medium text-muted">
+                        · Room {order.roomNumber}
+                      </span>
+                    </p>
+                    <p className="mt-0.5 line-clamp-1 text-xs text-muted">
                       {order.items
                         .map(
                           (i) =>
@@ -387,9 +834,9 @@ export function DashboardPage() {
                             }`,
                         )
                         .join(", ")}
-                    </span>
-                  </Td>
-                  <Td>
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-end">
                     <Badge
                       tone={
                         order.ageMinutes >= 12
@@ -399,126 +846,15 @@ export function DashboardPage() {
                             : "info"
                       }
                     >
-                      {order.ageMinutes >= 12
-                        ? "Late"
-                        : order.paymentStatus === "due"
-                          ? "Pending · Due"
-                          : "Pending · Paid"}
+                      {order.ageMinutes >= 12 ? "Late" : "Pending"}
                     </Badge>
-                  </Td>
-                  <Td className="text-muted">{formatAge(order.ageMinutes)}</Td>
-                </Tr>
-              ))}
-            </Table>
-          )}
-        </Card>
-
-        <Card>
-          <CardHeader
-            title={t.needsAttention}
-            badge={
-              attentionItems.length ? (
-                <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-[var(--danger)] px-1.5 text-[11px] font-bold text-white">
-                  {attentionItems.length}
-                </span>
-              ) : undefined
-            }
-            action={
-              <Link
-                to="/notifications"
-                className="inline-flex items-center gap-1 text-sm font-semibold text-muted hover:text-app"
-              >
-                {t.viewAll}
-                <ArrowUpRight className="h-3.5 w-3.5" />
-              </Link>
-            }
-          />
-          {attentionItems.length === 0 ? (
-            <EmptyState message="Nothing urgent — dirty rooms and overdue items will show here." />
-          ) : (
-            <ul className="space-y-4">
-              {attentionItems.map((item) => (
-                <li key={item.id}>
-                  <Link to={item.href} className="flex gap-3 hover:opacity-90">
-                    <span
-                      className={cn(
-                        "mt-1.5 h-2 w-2 shrink-0 rounded-full",
-                        item.tone === "danger"
-                          ? "bg-[var(--danger)]"
-                          : "bg-[var(--warning)]",
-                      )}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-bold leading-snug">{item.title}</p>
-                        <span className="shrink-0 text-xs text-muted">{item.age}</span>
-                      </div>
-                      <p className="mt-0.5 text-xs text-muted">{item.detail}</p>
-                    </div>
-                  </Link>
+                    <p className="mt-1 text-[11px] text-muted">
+                      {formatAge(order.ageMinutes)}
+                    </p>
+                  </div>
                 </li>
               ))}
             </ul>
-          )}
-        </Card>
-      </div>
-
-      <div className="mt-4">
-        <Card>
-          <CardHeader
-            title={t.liveDutyRoster}
-            badge={
-              <span className="flex items-center gap-2">
-                <Badge tone="info">{t.live}</Badge>
-                {todaysDuties.length ? (
-                  <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-accent-soft px-1.5 text-[11px] font-bold text-[var(--accent)]">
-                    {todaysDuties.length}
-                  </span>
-                ) : null}
-              </span>
-            }
-            action={
-              <Link
-                to="/duties-roster"
-                className="inline-flex items-center gap-1 text-sm font-semibold text-muted hover:text-app"
-              >
-                {t.viewAll}
-                <ArrowUpRight className="h-3.5 w-3.5" />
-              </Link>
-            }
-          />
-          {todaysDuties.length === 0 ? (
-            <EmptyState message={t.noDutiesToday} />
-          ) : (
-            <div className="max-h-[420px] overflow-y-auto overflow-x-hidden">
-              <Table
-                scrollX={false}
-                headers={[t.duty, t.assignee, t.shift, t.status]}
-                colWidths={["38%", "28%", "16%", "18%"]}
-              >
-                {todaysDuties.map((row) => (
-                  <Tr key={row.id}>
-                    <Td className="min-w-0">
-                      <p className="break-words font-semibold">{row.title}</p>
-                      <p className="mt-0.5 text-xs text-muted">{row.category}</p>
-                    </Td>
-                    <Td className="min-w-0 break-words">
-                      {row.assigneeName ? (
-                        <span className="font-semibold">{row.assigneeName}</span>
-                      ) : (
-                        <span className="text-muted">{t.unassigned}</span>
-                      )}
-                    </Td>
-                    <Td className="text-muted">{row.shift}</Td>
-                    <Td>
-                      <Badge tone={dutyStatusTone[row.status]}>
-                        {dutyStatusLabel[row.status]}
-                      </Badge>
-                    </Td>
-                  </Tr>
-                ))}
-              </Table>
-            </div>
           )}
         </Card>
       </div>
@@ -575,10 +911,15 @@ export function DashboardPage() {
 
         <Card>
           <CardHeader
-            title={t.revenueToday}
+            title={t.liveDutyRoster}
+            badge={
+              todaysDuties.length ? (
+                <Badge tone="gold">{todaysDuties.length}</Badge>
+              ) : undefined
+            }
             action={
               <Link
-                to="/invoices"
+                to="/duties-roster"
                 className="inline-flex items-center gap-1 text-sm font-semibold text-muted hover:text-app"
               >
                 {t.viewAll}
@@ -586,37 +927,28 @@ export function DashboardPage() {
               </Link>
             }
           />
-          <p className="text-3xl font-extrabold">
-            {formatRs(revenue.total, t.common.rs)}
-          </p>
-          <p className="mt-1 text-xs text-muted">
-            {revenue.checkOutCount} checkout
-            {revenue.checkOutCount === 1 ? "" : "s"} · {revenue.orderCount} food
-            order{revenue.orderCount === 1 ? "" : "s"} today
-          </p>
-          <div className="mt-5 space-y-4">
-            {[
-              { label: t.rooms, value: revenue.rooms },
-              { label: t.restaurant, value: revenue.restaurant },
-              { label: "Food paid", value: revenue.roomService },
-            ].map((row) => (
-              <div key={row.label}>
-                <div className="mb-1.5 flex items-center justify-between text-sm">
-                  <span className="font-medium">{row.label}</span>
-                  <span className="font-semibold">
-                    {formatRs(row.value, t.common.rs)}
-                  </span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-app">
-                  <div
-                    className="h-full rounded-full bg-accent transition-all"
-                    style={{ width: `${barWidth(row.value)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-5 text-xs text-muted">{t.revenueNote}</p>
+          {todaysDuties.length === 0 ? (
+            <EmptyState message={t.noDutiesToday} />
+          ) : (
+            <ul className="space-y-3">
+              {todaysDuties.map((row) => (
+                <li
+                  key={row.id}
+                  className="flex items-start justify-between gap-3 rounded-xl border border-app bg-app px-3 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold">{row.title}</p>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {row.assigneeName || t.unassigned} · {row.shift}
+                    </p>
+                  </div>
+                  <Badge tone={dutyStatusTone[row.status]}>
+                    {dutyStatusLabel[row.status]}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       </div>
     </div>
