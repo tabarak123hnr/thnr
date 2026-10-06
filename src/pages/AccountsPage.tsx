@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   Pencil,
   Plus,
   RefreshCw,
@@ -6,14 +7,13 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardHeader } from "../components/ui/Card";
 import { FancySelect } from "../components/ui/FancySelect";
 import { Modal } from "../components/ui/Modal";
 import { EmptyState, Field, Input, PageHeader, StatCard, TextArea } from "../components/ui/Page";
-import { Table, Td, Tr } from "../components/ui/Table";
 import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
 import { useToast } from "../context/toast-context";
@@ -57,6 +57,16 @@ import {
 
 type TabId = "overview" | "expenses" | "revenue";
 
+type MeterTone = "green" | "coral" | "blue" | "gold" | "slate";
+
+const METER_TONES: Record<MeterTone, { bar: string; dot: string }> = {
+  green: { bar: "bg-emerald-500", dot: "bg-emerald-500" },
+  coral: { bar: "bg-rose-400", dot: "bg-rose-400" },
+  blue: { bar: "bg-sky-500", dot: "bg-sky-500" },
+  gold: { bar: "bg-[var(--accent)]", dot: "bg-[var(--accent)]" },
+  slate: { bar: "bg-zinc-300 dark:bg-zinc-600", dot: "bg-zinc-400" },
+};
+
 const emptyForm = () => ({
   title: "",
   kind: "operating" as ExpenseKind,
@@ -78,6 +88,118 @@ function formatDate(iso: string) {
     month: "short",
     year: "numeric",
   });
+}
+
+function meterWidth(value: number, max: number) {
+  if (value <= 0 || max <= 0) return 8;
+  return Math.max(10, Math.min(100, Math.round((value / max) * 100)));
+}
+
+function AccountMeterRow({
+  label,
+  value,
+  max,
+  tone,
+  rs,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  tone: MeterTone;
+  rs: string;
+}) {
+  const colors = METER_TONES[tone];
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-2">
+      <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", colors.dot)} />
+      <div className="min-w-0">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="truncate text-sm text-muted">{label}</span>
+        </div>
+        <div className="h-2.5 overflow-hidden rounded-sm bg-[color-mix(in_oklab,var(--border)_70%,transparent)]">
+          <div
+            className={cn(
+              "h-full rounded-sm transition-[width] duration-500 ease-out",
+              colors.bar,
+            )}
+            style={{ width: `${meterWidth(value, max)}%` }}
+          />
+        </div>
+      </div>
+      <span className="shrink-0 text-sm font-semibold tabular-nums">
+        {formatRs(value, rs)}
+      </span>
+    </div>
+  );
+}
+
+function AccountMeterSection({
+  title,
+  rows,
+  totalLabel,
+  totalValue,
+  rs,
+}: {
+  title: string;
+  rows: { label: string; value: number; tone: MeterTone }[];
+  totalLabel: string;
+  totalValue: number;
+  rs: string;
+}) {
+  const max = Math.max(...rows.map((r) => r.value), totalValue, 1);
+  return (
+    <section>
+      <h3 className="mb-1 text-sm font-semibold tracking-tight">{title}</h3>
+      <div className="divide-y divide-[color-mix(in_oklab,var(--border)_80%,transparent)]">
+        {rows.map((row) => (
+          <AccountMeterRow
+            key={row.label}
+            label={row.label}
+            value={row.value}
+            max={max}
+            tone={row.tone}
+            rs={rs}
+          />
+        ))}
+        <div className="flex items-center justify-between gap-3 pt-3">
+          <span className="text-sm font-medium text-muted">{totalLabel}</span>
+          <span className="h-px flex-1 bg-[color-mix(in_oklab,var(--border)_90%,transparent)]" />
+          <span className="text-sm font-bold tabular-nums">
+            {formatRs(totalValue, rs)}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SummaryTile({
+  label,
+  value,
+  hint,
+  tone = "default",
+}: {
+  label: string;
+  value: ReactNode;
+  hint?: string;
+  tone?: "default" | "success" | "danger" | "info";
+}) {
+  return (
+    <div className="rounded-2xl border border-app bg-app px-4 py-5 text-center">
+      <p
+        className={cn(
+          "text-3xl font-extrabold tracking-tight tabular-nums",
+          tone === "success" && "text-emerald-600 dark:text-emerald-400",
+          tone === "danger" && "text-rose-600 dark:text-rose-400",
+          tone === "info" && "text-sky-600 dark:text-sky-400",
+        )}
+      >
+        {value}
+      </p>
+      <p className="mt-2 text-sm font-semibold">{label}</p>
+      {hint ? <p className="mt-1 text-xs text-muted">{hint}</p> : null}
+    </div>
+  );
 }
 
 export function AccountsPage() {
@@ -165,8 +287,63 @@ export function AccountsPage() {
     });
   }, [periodExpenses, categoryFilter, kindFilter]);
 
+  const expenseTabStats = useMemo(() => {
+    const total = filteredExpenses.reduce(
+      (s, e) => s + Math.max(0, e.amount || 0),
+      0,
+    );
+    const operatingRows = filteredExpenses.filter((e) => e.kind !== "ga");
+    const gaRows = filteredExpenses.filter((e) => e.kind === "ga");
+    const operatingTotal = operatingRows.reduce(
+      (s, e) => s + Math.max(0, e.amount || 0),
+      0,
+    );
+    const gaTotal = gaRows.reduce(
+      (s, e) => s + Math.max(0, e.amount || 0),
+      0,
+    );
+
+    const byPayment = EXPENSE_PAYMENT_METHODS.map((method) => {
+      const rows = filteredExpenses.filter((e) => e.paymentMethod === method);
+      return {
+        method,
+        amount: rows.reduce((s, e) => s + Math.max(0, e.amount || 0), 0),
+        count: rows.length,
+      };
+    }).filter((r) => r.amount > 0 || r.count > 0);
+
+    const byCategoryMap = new Map<ExpenseCategory, { amount: number; count: number }>();
+    for (const e of filteredExpenses) {
+      const row = byCategoryMap.get(e.category) ?? { amount: 0, count: 0 };
+      row.amount += Math.max(0, e.amount || 0);
+      row.count += 1;
+      byCategoryMap.set(e.category, row);
+    }
+    const byCategory = [...byCategoryMap.entries()]
+      .map(([category, row]) => ({ category, ...row }))
+      .sort((x, y) => y.amount - x.amount);
+
+    const cash = filteredExpenses
+      .filter((e) => e.paymentMethod === "cash")
+      .reduce((s, e) => s + Math.max(0, e.amount || 0), 0);
+    const bank = total - cash;
+
+    return {
+      total,
+      operatingTotal,
+      gaTotal,
+      operatingCount: operatingRows.length,
+      gaCount: gaRows.length,
+      byPayment,
+      byCategory,
+      cash,
+      bank,
+    };
+  }, [filteredExpenses]);
+
   const maxCategory = snapshot.byCategory[0]?.amount || 0;
   const maxGaCategory = snapshot.byGaCategory[0]?.amount || 0;
+  const maxFilteredCategory = expenseTabStats.byCategory[0]?.amount || 0;
 
   async function onRefresh() {
     setRefreshing(true);
@@ -404,182 +581,415 @@ export function AccountsPage() {
       </div>
 
       {tab === "overview" ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card>
-            <CardHeader title={a.revenueBreakdown} />
-            <ul className="space-y-3">
-              {[
-                {
-                  label: a.roomRevenue,
-                  value: snapshot.roomRevenue,
-                  meta: `${snapshot.checkoutCount} ${a.checkouts}`,
-                  tone: "gold" as const,
-                },
-                {
-                  label: a.foodRevenue,
-                  value: snapshot.foodRevenue,
-                  meta: `${snapshot.orderCount} ${a.orders}`,
-                  tone: "info" as const,
-                },
-                {
-                  label: a.foodPaid,
-                  value: snapshot.foodPaid,
-                  meta: a.paidOrders,
-                  tone: "success" as const,
-                },
-                {
-                  label: a.foodDue,
-                  value: snapshot.foodDue,
-                  meta: a.unpaidOrders,
-                  tone: "danger" as const,
-                },
-              ].map((row) => (
-                <li
-                  key={row.label}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-app bg-app px-4 py-3"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{row.label}</p>
-                    <p className="text-xs text-muted">{row.meta}</p>
+        <div className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="lg:col-span-1">
+              <CardHeader title={a.revenueBreakdown} />
+              <div className="grid grid-cols-2 gap-3">
+                <SummaryTile
+                  label={a.room}
+                  value={formatRs(snapshot.roomRevenue, t.common.rs)}
+                  hint={`${snapshot.checkoutCount} ${a.checkouts}`}
+                  tone="success"
+                />
+                <SummaryTile
+                  label={a.food}
+                  value={formatRs(snapshot.foodRevenue, t.common.rs)}
+                  hint={`${snapshot.orderCount} ${a.orders}`}
+                  tone="info"
+                />
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <div className="rounded-xl border border-app bg-elevated px-3 py-3 text-center">
+                  <p className="text-lg font-extrabold tabular-nums text-emerald-600">
+                    {formatRs(snapshot.collected, t.common.rs)}
+                  </p>
+                  <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    {a.collected}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-app bg-elevated px-3 py-3 text-center">
+                  <p className="text-lg font-extrabold tabular-nums text-rose-600">
+                    {formatRs(snapshot.toBePaid, t.common.rs)}
+                  </p>
+                  <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    {a.outstanding}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-app bg-elevated px-3 py-3 text-center">
+                  <p
+                    className={cn(
+                      "text-lg font-extrabold tabular-nums",
+                      profitPositive ? "text-emerald-600" : "text-rose-600",
+                    )}
+                  >
+                    {formatRs(snapshot.profit, t.common.rs)}
+                  </p>
+                  <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    {a.profit}
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="lg:col-span-2">
+              <CardHeader
+                title={a.accountPanel}
+                action={
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-app">
+                    <BarChart3 className="h-4 w-4 text-sky-500" />
                   </div>
-                  <Badge tone={row.tone}>{formatRs(row.value, t.common.rs)}</Badge>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-4 flex items-center gap-2 rounded-xl border border-app px-4 py-3">
-              {profitPositive ? (
-                <TrendingUp className="h-4 w-4 text-emerald-600" />
+                }
+              />
+              <p className="mb-5 text-sm text-muted">{a.accountPanelSub}</p>
+
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="space-y-6">
+                  <AccountMeterSection
+                    title={a.cashBankBalance}
+                    rs={t.common.rs}
+                    totalLabel={t.common.total}
+                    totalValue={snapshot.cashBalance + snapshot.bankBalance}
+                    rows={[
+                      {
+                        label: a.cashInHand,
+                        value: snapshot.cashBalance,
+                        tone: "green",
+                      },
+                      {
+                        label: a.bankCardOnline,
+                        value: snapshot.bankBalance,
+                        tone: "coral",
+                      },
+                    ]}
+                  />
+                  <AccountMeterSection
+                    title={a.receivables}
+                    rs={t.common.rs}
+                    totalLabel={t.common.total}
+                    totalValue={snapshot.toBePaid + snapshot.partialPaid}
+                    rows={[
+                      {
+                        label: a.toBePaid,
+                        value: snapshot.toBePaid,
+                        tone: "coral",
+                      },
+                      {
+                        label: a.partialPaidLabel,
+                        value: snapshot.partialPaid,
+                        tone: "gold",
+                      },
+                    ]}
+                  />
+                </div>
+
+                <div className="space-y-6">
+                  <AccountMeterSection
+                    title={a.revenuesPanel}
+                    rs={t.common.rs}
+                    totalLabel={t.common.total}
+                    totalValue={snapshot.revenue}
+                    rows={[
+                      {
+                        label: a.roomRevenue,
+                        value: snapshot.roomRevenue,
+                        tone: "green",
+                      },
+                      {
+                        label: a.foodRevenue,
+                        value: snapshot.foodRevenue,
+                        tone: "blue",
+                      },
+                    ]}
+                  />
+                  <AccountMeterSection
+                    title={a.outflowsPanel}
+                    rs={t.common.rs}
+                    totalLabel={t.common.total}
+                    totalValue={snapshot.expenditures + snapshot.gaExpenditures}
+                    rows={[
+                      {
+                        label: a.expenseCashOut,
+                        value: snapshot.expenseCash,
+                        tone: "coral",
+                      },
+                      {
+                        label: a.expenseBankOut,
+                        value: snapshot.expenseBank,
+                        tone: "blue",
+                      },
+                    ]}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-5 flex items-center gap-2 rounded-xl border border-app bg-app px-4 py-3">
+                {profitPositive ? (
+                  <TrendingUp className="h-4 w-4 shrink-0 text-emerald-600" />
+                ) : (
+                  <TrendingDown className="h-4 w-4 shrink-0 text-red-600" />
+                )}
+                <p className="text-sm">
+                  <span className="font-semibold">{a.netResult}: </span>
+                  <span
+                    className={
+                      profitPositive ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"
+                    }
+                  >
+                    {formatRs(snapshot.profit, t.common.rs)}
+                  </span>
+                  <span className="text-muted">
+                    {" "}
+                    ({a.revenue} − {a.expenditures} − {a.gaExpenditures})
+                  </span>
+                </p>
+              </div>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader title={a.expenseByCategory} />
+              {snapshot.byCategory.length === 0 ? (
+                <EmptyState message={`${a.noExpenses} ${a.noExpensesSub}`} />
               ) : (
-                <TrendingDown className="h-4 w-4 text-red-600" />
+                <ul className="space-y-3">
+                  {snapshot.byCategory.map((row, index) => {
+                    const pct = maxCategory
+                      ? Math.max(8, Math.round((row.amount / maxCategory) * 100))
+                      : 0;
+                    const tone: MeterTone =
+                      index % 3 === 0 ? "gold" : index % 3 === 1 ? "blue" : "green";
+                    return (
+                      <li key={row.category}>
+                        <div className="mb-1.5 flex items-center justify-between gap-2 text-sm">
+                          <span className="flex items-center gap-2 font-medium">
+                            <span
+                              className={cn(
+                                "h-2 w-2 rounded-full",
+                                METER_TONES[tone].dot,
+                              )}
+                            />
+                            {EXPENSE_CATEGORY_LABELS[row.category]}
+                          </span>
+                          <span className="tabular-nums text-muted">
+                            {formatRs(row.amount, t.common.rs)} · {row.count}
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-sm bg-app">
+                          <div
+                            className={cn(
+                              "h-full rounded-sm transition-[width] duration-500",
+                              METER_TONES[tone].bar,
+                            )}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
-              <p className="text-sm">
-                <span className="font-semibold">{a.netResult}: </span>
-                <span className={profitPositive ? "text-emerald-700" : "text-red-700"}>
-                  {formatRs(snapshot.profit, t.common.rs)}
-                </span>
-                <span className="text-muted">
-                  {" "}
-                  ({a.revenue} − {a.expenditures} − {a.gaExpenditures})
-                </span>
-              </p>
-            </div>
-          </Card>
+            </Card>
 
-          <Card>
-            <CardHeader title={a.settlementTitle} />
-            <p className="mb-3 text-sm text-muted">{a.settlementSub}</p>
-            <ul className="space-y-3">
-              {[
-                {
-                  label: a.cashCollected,
-                  value: snapshot.collected,
-                  meta: a.stayCollectedHint,
-                  tone: "success" as const,
-                },
-                {
-                  label: a.toBePaid,
-                  value: snapshot.toBePaid,
-                  meta: a.outstanding,
-                  tone: "danger" as const,
-                },
-                {
-                  label: a.partialPaidLabel,
-                  value: snapshot.partialPaid,
-                  meta: `${snapshot.partialStayCount} ${a.partials}`,
-                  tone: "warning" as const,
-                },
-                {
-                  label: a.partialDueLabel,
-                  value: snapshot.partialDue,
-                  meta: a.partials,
-                  tone: "gold" as const,
-                },
-              ].map((row) => (
-                <li
-                  key={row.label}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-app bg-app px-4 py-3"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{row.label}</p>
-                    <p className="text-xs text-muted">{row.meta}</p>
-                  </div>
-                  <Badge tone={row.tone}>{formatRs(row.value, t.common.rs)}</Badge>
-                </li>
-              ))}
-            </ul>
-          </Card>
-
-          <Card>
-            <CardHeader title={a.expenseByCategory} />
-            {snapshot.byCategory.length === 0 ? (
-              <EmptyState message={`${a.noExpenses} ${a.noExpensesSub}`} />
-            ) : (
-              <ul className="space-y-3">
-                {snapshot.byCategory.map((row) => {
-                  const pct = maxCategory
-                    ? Math.max(6, Math.round((row.amount / maxCategory) * 100))
-                    : 0;
-                  return (
-                    <li key={row.category}>
-                      <div className="mb-1 flex items-center justify-between gap-2 text-sm">
-                        <span className="font-medium">
-                          {EXPENSE_CATEGORY_LABELS[row.category]}
-                        </span>
-                        <span className="tabular-nums text-muted">
-                          {formatRs(row.amount, t.common.rs)} · {row.count}
-                        </span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-app">
-                        <div
-                          className="h-full rounded-full bg-[var(--accent)]"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
-
-          <Card>
-            <CardHeader title={a.gaByCategory} />
-            {snapshot.byGaCategory.length === 0 ? (
-              <EmptyState message={a.noGaExpenses} />
-            ) : (
-              <ul className="space-y-3">
-                {snapshot.byGaCategory.map((row) => {
-                  const pct = maxGaCategory
-                    ? Math.max(6, Math.round((row.amount / maxGaCategory) * 100))
-                    : 0;
-                  return (
-                    <li key={row.category}>
-                      <div className="mb-1 flex items-center justify-between gap-2 text-sm">
-                        <span className="font-medium">
-                          {EXPENSE_CATEGORY_LABELS[row.category]}
-                        </span>
-                        <span className="tabular-nums text-muted">
-                          {formatRs(row.amount, t.common.rs)} · {row.count}
-                        </span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-app">
-                        <div
-                          className="h-full rounded-full bg-[var(--accent)]"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
+            <Card>
+              <CardHeader title={a.gaByCategory} />
+              {snapshot.byGaCategory.length === 0 ? (
+                <EmptyState message={a.noGaExpenses} />
+              ) : (
+                <ul className="space-y-3">
+                  {snapshot.byGaCategory.map((row, index) => {
+                    const pct = maxGaCategory
+                      ? Math.max(8, Math.round((row.amount / maxGaCategory) * 100))
+                      : 0;
+                    const tone: MeterTone =
+                      index % 3 === 0 ? "coral" : index % 3 === 1 ? "blue" : "gold";
+                    return (
+                      <li key={row.category}>
+                        <div className="mb-1.5 flex items-center justify-between gap-2 text-sm">
+                          <span className="flex items-center gap-2 font-medium">
+                            <span
+                              className={cn(
+                                "h-2 w-2 rounded-full",
+                                METER_TONES[tone].dot,
+                              )}
+                            />
+                            {EXPENSE_CATEGORY_LABELS[row.category]}
+                          </span>
+                          <span className="tabular-nums text-muted">
+                            {formatRs(row.amount, t.common.rs)} · {row.count}
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-sm bg-app">
+                          <div
+                            className={cn(
+                              "h-full rounded-sm transition-[width] duration-500",
+                              METER_TONES[tone].bar,
+                            )}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </Card>
+          </div>
         </div>
       ) : null}
 
       {tab === "expenses" ? (
-        <div>
-          <div className="mb-3 flex flex-wrap gap-2">
+        <div className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="lg:col-span-1">
+              <CardHeader title={a.tabExpenses} />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                <SummaryTile
+                  label={t.common.total}
+                  value={formatRs(expenseTabStats.total, t.common.rs)}
+                  hint={`${filteredExpenses.length} ${a.entries}`}
+                  tone="danger"
+                />
+                <SummaryTile
+                  label={a.kindOperating}
+                  value={formatRs(expenseTabStats.operatingTotal, t.common.rs)}
+                  hint={`${expenseTabStats.operatingCount} ${a.entries}`}
+                  tone="default"
+                />
+                <SummaryTile
+                  label={a.kindGa}
+                  value={formatRs(expenseTabStats.gaTotal, t.common.rs)}
+                  hint={`${expenseTabStats.gaCount} ${a.entries}`}
+                  tone="info"
+                />
+              </div>
+            </Card>
+
+            <Card className="lg:col-span-2">
+              <CardHeader
+                title={a.outflowsPanel}
+                action={
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-app">
+                    <BarChart3 className="h-4 w-4 text-rose-400" />
+                  </div>
+                }
+              />
+              <p className="mb-5 text-sm text-muted">{a.expensePanelSub}</p>
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="space-y-6">
+                  <AccountMeterSection
+                    title={a.byLedger}
+                    rs={t.common.rs}
+                    totalLabel={t.common.total}
+                    totalValue={expenseTabStats.total}
+                    rows={[
+                      {
+                        label: a.kindOperating,
+                        value: expenseTabStats.operatingTotal,
+                        tone: "gold",
+                      },
+                      {
+                        label: a.kindGa,
+                        value: expenseTabStats.gaTotal,
+                        tone: "blue",
+                      },
+                    ]}
+                  />
+                  <AccountMeterSection
+                    title={a.cashBankBalance}
+                    rs={t.common.rs}
+                    totalLabel={t.common.total}
+                    totalValue={expenseTabStats.total}
+                    rows={[
+                      {
+                        label: a.expenseCashOut,
+                        value: expenseTabStats.cash,
+                        tone: "coral",
+                      },
+                      {
+                        label: a.expenseBankOut,
+                        value: expenseTabStats.bank,
+                        tone: "blue",
+                      },
+                    ]}
+                  />
+                </div>
+                <AccountMeterSection
+                  title={a.byPaymentMethod}
+                  rs={t.common.rs}
+                  totalLabel={t.common.total}
+                  totalValue={expenseTabStats.total}
+                  rows={
+                    expenseTabStats.byPayment.length
+                      ? expenseTabStats.byPayment.map((row, index) => ({
+                          label: EXPENSE_PAYMENT_LABELS[row.method],
+                          value: row.amount,
+                          tone: (["green", "coral", "blue", "gold"] as MeterTone[])[
+                            index % 4
+                          ],
+                        }))
+                      : [
+                          {
+                            label: a.cashInHand,
+                            value: 0,
+                            tone: "slate" as MeterTone,
+                          },
+                        ]
+                  }
+                />
+              </div>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader title={a.expenseByCategory} />
+            {expenseTabStats.byCategory.length === 0 ? (
+              <EmptyState message={`${a.noExpenses} ${a.noExpensesSub}`} />
+            ) : (
+              <ul className="space-y-3">
+                {expenseTabStats.byCategory.map((row, index) => {
+                  const pct = maxFilteredCategory
+                    ? Math.max(8, Math.round((row.amount / maxFilteredCategory) * 100))
+                    : 0;
+                  const tone: MeterTone =
+                    index % 4 === 0
+                      ? "coral"
+                      : index % 4 === 1
+                        ? "blue"
+                        : index % 4 === 2
+                          ? "gold"
+                          : "green";
+                  return (
+                    <li key={row.category}>
+                      <div className="mb-1.5 flex items-center justify-between gap-2 text-sm">
+                        <span className="flex items-center gap-2 font-medium">
+                          <span
+                            className={cn("h-2 w-2 rounded-full", METER_TONES[tone].dot)}
+                          />
+                          {EXPENSE_CATEGORY_LABELS[row.category]}
+                        </span>
+                        <span className="tabular-nums text-muted">
+                          {formatRs(row.amount, t.common.rs)} · {row.count}
+                        </span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-sm bg-app">
+                        <div
+                          className={cn(
+                            "h-full rounded-sm transition-[width] duration-500",
+                            METER_TONES[tone].bar,
+                          )}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+
+          <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
               variant={kindFilter === "all" ? "gold" : "secondary"}
@@ -602,7 +1012,7 @@ export function AccountsPage() {
               {a.kindGa}
             </Button>
           </div>
-          <div className="mb-3 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
               variant={categoryFilter === "all" ? "gold" : "secondary"}
@@ -623,72 +1033,100 @@ export function AccountsPage() {
           </div>
 
           <Card>
+            <CardHeader
+              title={a.expenseListTitle}
+              badge={
+                <Badge tone="muted">
+                  {filteredExpenses.length} {a.entries}
+                </Badge>
+              }
+            />
             {filteredExpenses.length === 0 ? (
               <EmptyState message={`${a.noExpenses} ${a.noExpensesSub}`} />
             ) : (
-              <Table
-                headers={[
-                  t.common.date,
-                  a.title,
-                  t.common.type,
-                  t.common.amount,
-                  a.payment,
-                  a.vendor,
-                  t.common.actions,
-                ]}
-                colWidths={["12%", "20%", "18%", "12%", "12%", "12%", "14%"]}
-              >
-                {filteredExpenses.map((row) => (
-                  <Tr key={row.id}>
-                    <Td>{formatDate(row.date)}</Td>
-                    <Td>
-                      <p className="font-medium">{row.title}</p>
-                      {row.notes ? (
-                        <p className="max-w-[220px] truncate text-xs text-muted">
-                          {row.notes}
-                        </p>
-                      ) : null}
-                    </Td>
-                    <Td>
-                      <div className="flex flex-wrap gap-1">
-                        <Badge tone={row.kind === "ga" ? "info" : "gold"}>
-                          {row.kind === "ga" ? a.kindGa : a.kindOperating}
-                        </Badge>
-                        <Badge tone="muted">
-                          {EXPENSE_CATEGORY_LABELS[row.category]}
-                        </Badge>
+              <ul className="space-y-3">
+                {filteredExpenses.map((row) => {
+                  const pct = expenseTabStats.total
+                    ? Math.max(
+                        8,
+                        Math.round(
+                          (Math.max(0, row.amount || 0) / expenseTabStats.total) * 100,
+                        ),
+                      )
+                    : 8;
+                  const tone: MeterTone =
+                    row.paymentMethod === "cash"
+                      ? "coral"
+                      : row.paymentMethod === "card"
+                        ? "blue"
+                        : row.paymentMethod === "bank_transfer"
+                          ? "green"
+                          : "gold";
+                  return (
+                    <li
+                      key={row.id}
+                      className="rounded-2xl border border-app bg-app px-4 py-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-semibold">{row.title}</p>
+                            <Badge tone={row.kind === "ga" ? "info" : "gold"}>
+                              {row.kind === "ga" ? a.kindGa : a.kindOperating}
+                            </Badge>
+                            <Badge tone="muted">
+                              {EXPENSE_CATEGORY_LABELS[row.category]}
+                            </Badge>
+                          </div>
+                          <p className="mt-1 text-sm text-muted">
+                            {formatDate(row.date)}
+                            {" · "}
+                            {EXPENSE_PAYMENT_LABELS[row.paymentMethod]}
+                            {row.vendor ? ` · ${row.vendor}` : ""}
+                          </p>
+                          {row.notes ? (
+                            <p className="mt-1 max-w-xl truncate text-xs text-muted">
+                              {row.notes}
+                            </p>
+                          ) : null}
+                          <div className="mt-3 h-2 overflow-hidden rounded-sm bg-elevated">
+                            <div
+                              className={cn(
+                                "h-full rounded-sm transition-[width] duration-500",
+                                METER_TONES[tone].bar,
+                              )}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-2">
+                          <p className="text-base font-extrabold tabular-nums">
+                            {formatRs(row.amount, t.common.rs)}
+                          </p>
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => openEdit(row)}
+                              title={t.common.edit}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setDeleteId(row.id)}
+                              title={t.common.delete}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
                       </div>
-                    </Td>
-                    <Td className="font-semibold tabular-nums">
-                      {formatRs(row.amount, t.common.rs)}
-                    </Td>
-                    <Td className="text-muted">
-                      {EXPENSE_PAYMENT_LABELS[row.paymentMethod]}
-                    </Td>
-                    <Td className="text-muted">{row.vendor || "—"}</Td>
-                    <Td>
-                      <div className="flex gap-1">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => openEdit(row)}
-                          title={t.common.edit}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setDeleteId(row.id)}
-                          title={t.common.delete}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </Td>
-                  </Tr>
-                ))}
-              </Table>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </Card>
         </div>
@@ -696,76 +1134,144 @@ export function AccountsPage() {
 
       {tab === "revenue" ? (
         <div className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader title={a.roomRevenue} />
-              <p className="text-3xl font-bold tracking-tight">
-                {formatRs(snapshot.roomRevenue, t.common.rs)}
-              </p>
-              <p className="mt-2 text-sm text-muted">
-                {a.roomRevenueHint.replace(
-                  "{n}",
-                  String(snapshot.checkoutCount),
-                )}
-              </p>
-              <ul className="mt-4 space-y-2">
-                <li className="flex justify-between rounded-xl border border-app bg-app px-4 py-3 text-sm">
-                  <div>
-                    <p className="font-medium">{a.collectedOnCheckout}</p>
-                    <p className="text-xs text-muted">{a.stayCollectedHint}</p>
-                  </div>
-                  <span className="font-semibold tabular-nums text-emerald-700">
-                    {formatRs(snapshot.stayCollected, t.common.rs)}
-                  </span>
-                </li>
-                <li className="flex justify-between rounded-xl border border-app bg-app px-4 py-3 text-sm">
-                  <span className="text-muted">{a.toBePaid}</span>
-                  <span className="font-semibold tabular-nums text-red-700">
-                    {formatRs(snapshot.toBePaid, t.common.rs)}
-                  </span>
-                </li>
-                <li className="flex justify-between rounded-xl border border-app bg-app px-4 py-3 text-sm">
-                  <div>
-                    <p className="text-muted">{a.partials}</p>
-                    <p className="text-xs text-muted">
-                      {snapshot.partialStayCount} stay
-                      {snapshot.partialStayCount === 1 ? "" : "s"} · paid{" "}
-                      {formatRs(snapshot.partialPaid, t.common.rs)}
-                    </p>
-                  </div>
-                  <span className="font-semibold tabular-nums text-amber-700">
-                    {formatRs(snapshot.partialDue, t.common.rs)}
-                  </span>
-                </li>
-              </ul>
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="lg:col-span-1">
+              <CardHeader title={a.tabRevenue} />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                <SummaryTile
+                  label={a.revenue}
+                  value={formatRs(snapshot.revenue, t.common.rs)}
+                  hint={`${snapshot.checkoutCount} ${a.checkouts} · ${snapshot.orderCount} ${a.orders}`}
+                  tone="success"
+                />
+                <SummaryTile
+                  label={a.roomRevenue}
+                  value={formatRs(snapshot.roomRevenue, t.common.rs)}
+                  hint={a.roomRevenueHint.replace(
+                    "{n}",
+                    String(snapshot.checkoutCount),
+                  )}
+                  tone="default"
+                />
+                <SummaryTile
+                  label={a.foodRevenue}
+                  value={formatRs(snapshot.foodRevenue, t.common.rs)}
+                  hint={a.foodRevenueHint.replace(
+                    "{n}",
+                    String(snapshot.orderCount),
+                  )}
+                  tone="info"
+                />
+              </div>
             </Card>
-            <Card>
-              <CardHeader title={a.foodRevenue} />
-              <p className="text-3xl font-bold tracking-tight">
-                {formatRs(snapshot.foodRevenue, t.common.rs)}
-              </p>
-              <p className="mt-2 text-sm text-muted">
-                {a.foodRevenueHint.replace("{n}", String(snapshot.orderCount))}
-              </p>
-              <ul className="mt-4 space-y-2">
-                <li className="flex justify-between rounded-xl border border-app bg-app px-4 py-3 text-sm">
-                  <span className="text-muted">{t.common.paid}</span>
-                  <span className="font-semibold text-emerald-700 tabular-nums">
-                    {formatRs(snapshot.foodPaid, t.common.rs)}
-                  </span>
-                </li>
-                <li className="flex justify-between rounded-xl border border-app bg-app px-4 py-3 text-sm">
-                  <span className="text-muted">{t.common.unpaid}</span>
-                  <span className="font-semibold text-red-700 tabular-nums">
-                    {formatRs(snapshot.foodDue, t.common.rs)}
-                  </span>
-                </li>
-              </ul>
+
+            <Card className="lg:col-span-2">
+              <CardHeader
+                title={a.revenuesPanel}
+                action={
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-app">
+                    <BarChart3 className="h-4 w-4 text-sky-500" />
+                  </div>
+                }
+              />
+              <p className="mb-5 text-sm text-muted">{a.revenuePanelSub}</p>
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="space-y-6">
+                  <AccountMeterSection
+                    title={a.revenuesPanel}
+                    rs={t.common.rs}
+                    totalLabel={t.common.total}
+                    totalValue={snapshot.revenue}
+                    rows={[
+                      {
+                        label: a.roomRevenue,
+                        value: snapshot.roomRevenue,
+                        tone: "green",
+                      },
+                      {
+                        label: a.foodRevenue,
+                        value: snapshot.foodRevenue,
+                        tone: "blue",
+                      },
+                    ]}
+                  />
+                  <AccountMeterSection
+                    title={a.foodRevenue}
+                    rs={t.common.rs}
+                    totalLabel={t.common.total}
+                    totalValue={snapshot.foodRevenue}
+                    rows={[
+                      {
+                        label: a.foodPaid,
+                        value: snapshot.foodPaid,
+                        tone: "green",
+                      },
+                      {
+                        label: a.foodDue,
+                        value: snapshot.foodDue,
+                        tone: "coral",
+                      },
+                    ]}
+                  />
+                </div>
+                <div className="space-y-6">
+                  <AccountMeterSection
+                    title={a.cashBankBalance}
+                    rs={t.common.rs}
+                    totalLabel={t.common.total}
+                    totalValue={snapshot.cashBalance + snapshot.bankBalance}
+                    rows={[
+                      {
+                        label: a.cashInHand,
+                        value: snapshot.cashBalance,
+                        tone: "green",
+                      },
+                      {
+                        label: a.bankCardOnline,
+                        value: snapshot.bankBalance,
+                        tone: "coral",
+                      },
+                    ]}
+                  />
+                  <AccountMeterSection
+                    title={a.settlementTitle}
+                    rs={t.common.rs}
+                    totalLabel={t.common.total}
+                    totalValue={
+                      snapshot.collected + snapshot.toBePaid + snapshot.partialPaid
+                    }
+                    rows={[
+                      {
+                        label: a.collectedOnCheckout,
+                        value: snapshot.collected,
+                        tone: "green",
+                      },
+                      {
+                        label: a.toBePaid,
+                        value: snapshot.toBePaid,
+                        tone: "coral",
+                      },
+                      {
+                        label: a.partialPaidLabel,
+                        value: snapshot.partialPaid,
+                        tone: "gold",
+                      },
+                    ]}
+                  />
+                </div>
+              </div>
             </Card>
           </div>
 
           <Card>
-            <CardHeader title={a.checkoutDetailTitle} />
+            <CardHeader
+              title={a.checkoutDetailTitle}
+              badge={
+                <Badge tone="muted">
+                  {periodCheckouts.length} {a.checkouts}
+                </Badge>
+              }
+            />
             <p className="mb-4 text-sm text-muted">{a.checkoutDetailSub}</p>
             {periodCheckouts.length === 0 ? (
               <EmptyState message={a.noCheckouts} />
@@ -778,6 +1284,19 @@ export function AccountsPage() {
                       ? String(row.checkedOutAt).slice(0, 10)
                       : row.checkOutAt.slice(0, 10)) || "",
                   );
+                  const total = Math.max(
+                    0,
+                    Number(row.totalBill) ||
+                      Number(row.roomCharges) + Number(row.extraCharges) ||
+                      0,
+                  );
+                  const paid = Math.max(0, Number(row.amountPaid) || 0);
+                  const due = Math.max(0, Number(row.balanceDue) || 0);
+                  const paidPct = total
+                    ? Math.max(6, Math.min(100, Math.round((paid / total) * 100)))
+                    : paid > 0
+                      ? 100
+                      : 0;
                   return (
                     <div
                       key={row.id}
@@ -799,6 +1318,27 @@ export function AccountsPage() {
                         <Badge tone={paymentStatusTone(row.paymentStatus)}>
                           {paymentStatusLabel(row.paymentStatus)}
                         </Badge>
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                          <span>{a.colPaid}</span>
+                          <span>
+                            {formatRs(paid, t.common.rs)} / {formatRs(total, t.common.rs)}
+                          </span>
+                        </div>
+                        <div className="flex h-2.5 overflow-hidden rounded-sm bg-elevated">
+                          <div
+                            className="h-full bg-emerald-500 transition-[width] duration-500"
+                            style={{ width: `${paidPct}%` }}
+                          />
+                          {due > 0 ? (
+                            <div
+                              className="h-full bg-rose-400 transition-[width] duration-500"
+                              style={{ width: `${Math.max(0, 100 - paidPct)}%` }}
+                            />
+                          ) : null}
+                        </div>
                       </div>
 
                       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -877,54 +1417,79 @@ export function AccountsPage() {
           </Card>
 
           <Card>
-            <CardHeader title={a.openBalancesTitle} />
+            <CardHeader
+              title={a.openBalancesTitle}
+              badge={
+                <Badge tone="danger">
+                  {openBalanceStays.length} {a.partials}
+                </Badge>
+              }
+            />
             <p className="mb-4 text-sm text-muted">{a.openBalancesSub}</p>
             {openBalanceStays.length === 0 ? (
               <EmptyState message={a.noOpenBalances} />
             ) : (
-              <Table
-                headers={[
-                  t.common.guest,
-                  t.common.room,
-                  t.common.checkIn,
-                  a.colTotalBill,
-                  a.colPaid,
-                  a.colBalance,
-                  a.colPlan,
-                  t.status,
-                ]}
-                colWidths={["16%", "8%", "12%", "12%", "12%", "12%", "16%", "12%"]}
-              >
-                {openBalanceStays.map((row) => (
-                  <Tr key={row.id}>
-                    <Td>
-                      <p className="font-semibold">{row.guestName}</p>
-                      <p className="text-xs text-muted">{row.phone || "—"}</p>
-                    </Td>
-                    <Td className="font-medium">{row.roomNumber}</Td>
-                    <Td className="text-muted">
-                      {formatDate(row.checkInAt.slice(0, 10))}
-                    </Td>
-                    <Td className="tabular-nums">
-                      {formatRs(row.totalBill || 0, t.common.rs)}
-                    </Td>
-                    <Td className="tabular-nums text-emerald-700">
-                      {formatRs(row.amountPaid || 0, t.common.rs)}
-                    </Td>
-                    <Td className="tabular-nums font-semibold text-red-700">
-                      {formatRs(row.balanceDue || 0, t.common.rs)}
-                    </Td>
-                    <Td className="text-xs text-muted">
-                      {paymentPlanLabel(row.paymentTiming)}
-                    </Td>
-                    <Td>
-                      <Badge tone={paymentStatusTone(row.paymentStatus)}>
-                        {paymentStatusLabel(row.paymentStatus)}
-                      </Badge>
-                    </Td>
-                  </Tr>
-                ))}
-              </Table>
+              <ul className="space-y-3">
+                {openBalanceStays.map((row) => {
+                  const total = Math.max(0, Number(row.totalBill) || 0);
+                  const paid = Math.max(0, Number(row.amountPaid) || 0);
+                  const due = Math.max(0, Number(row.balanceDue) || 0);
+                  const paidPct = total
+                    ? Math.max(6, Math.min(100, Math.round((paid / total) * 100)))
+                    : 0;
+                  return (
+                    <li
+                      key={row.id}
+                      className="rounded-2xl border border-app bg-app px-4 py-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-extrabold">{row.guestName}</p>
+                          <p className="mt-0.5 text-sm text-muted">
+                            {t.common.room} {row.roomNumber}
+                            {row.phone ? ` · ${row.phone}` : ""}
+                            {" · "}
+                            {formatDate(row.checkInAt.slice(0, 10))}
+                          </p>
+                          <p className="mt-1 text-xs text-muted">
+                            {a.colPlan}: {paymentPlanLabel(row.paymentTiming)}
+                          </p>
+                        </div>
+                        <Badge tone={paymentStatusTone(row.paymentStatus)}>
+                          {paymentStatusLabel(row.paymentStatus)}
+                        </Badge>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+                        <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+                        <div className="min-w-0">
+                          <div className="mb-1 flex justify-between gap-2 text-xs text-muted">
+                            <span>
+                              {a.colPaid} {formatRs(paid, t.common.rs)}
+                            </span>
+                            <span>
+                              {a.colBalance} {formatRs(due, t.common.rs)}
+                            </span>
+                          </div>
+                          <div className="flex h-2.5 overflow-hidden rounded-sm bg-elevated">
+                            <div
+                              className="h-full bg-emerald-500"
+                              style={{ width: `${paidPct}%` }}
+                            />
+                            <div
+                              className="h-full bg-rose-400"
+                              style={{ width: `${Math.max(0, 100 - paidPct)}%` }}
+                            />
+                          </div>
+                        </div>
+                        <span className="text-sm font-bold tabular-nums">
+                          {formatRs(total, t.common.rs)}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </Card>
         </div>

@@ -76,6 +76,10 @@ export type AccountsSnapshot = {
    * checkout amountPaid (room + extras) + paid food still on in-house stays.
    */
   collected: number;
+  /** Guest payments settled as physical cash */
+  cashBalance: number;
+  /** Guest payments settled via card / online / bank transfer */
+  bankBalance: number;
   /** Cash collected on period checkouts (full stay settlement) */
   stayCollected: number;
   /** Open stay balances + unpaid food on in-house / unsettled stays */
@@ -91,6 +95,10 @@ export type AccountsSnapshot = {
   expenditures: number;
   /** Operating and admin expenses */
   gaExpenditures: number;
+  /** Operating expenses paid in cash */
+  expenseCash: number;
+  /** Operating expenses paid by card / bank / other */
+  expenseBank: number;
   profit: number;
   checkoutCount: number;
   orderCount: number;
@@ -99,6 +107,26 @@ export type AccountsSnapshot = {
   byCategory: CategoryBreakdown[];
   byGaCategory: CategoryBreakdown[];
 };
+
+/** Map stay / bill payment channels into cash drawer vs bank. */
+function isBankChannel(method: string | null | undefined) {
+  return (
+    method === "card" ||
+    method === "online" ||
+    method === "bank_transfer"
+  );
+}
+
+/** Best-effort channel for money already on a stay folio. */
+function stayCollectionChannel(c: CheckInRecord): "cash" | "bank" {
+  const method =
+    c.checkoutPaymentMethod ||
+    c.roomBillPaymentMethod ||
+    c.checkInPaymentMethod ||
+    c.foodBillPaymentMethod ||
+    "cash";
+  return isBankChannel(method) ? "bank" : "cash";
+}
 
 function breakdownByCategory(rows: ExpenseRecord[]): CategoryBreakdown[] {
   const byCategoryMap = new Map<ExpenseCategory, { amount: number; count: number }>();
@@ -142,6 +170,14 @@ export function buildAccountsSnapshot(
     0,
   );
 
+  let cashBalance = 0;
+  let bankBalance = 0;
+  for (const c of checkedOutInPeriod) {
+    const paid = Math.max(0, Number(c.amountPaid) || 0);
+    if (stayCollectionChannel(c) === "bank") bankBalance += paid;
+    else cashBalance += paid;
+  }
+
   const ordersInPeriod = orders.filter((o) => inRange(tsMs(o.createdAt), range));
   const foodRevenue = ordersInPeriod.reduce((s, o) => s + Math.max(0, o.amount || 0), 0);
 
@@ -169,20 +205,32 @@ export function buildAccountsSnapshot(
   const foodDue = foodRevenue - foodPaid;
 
   // Paid food already inside checkout amountPaid — don't count twice
-  const foodPaidOnOpenStays = ordersInPeriod
-    .filter(
-      (o) =>
-        orderIsPaid(o) &&
-        o.checkInId &&
-        !checkedOutIds.has(o.checkInId),
-    )
-    .reduce((s, o) => s + Math.max(0, o.amount || 0), 0);
+  const openStayById = new Map(checkIns.map((c) => [c.id, c]));
+  let foodPaidOnOpenStays = 0;
+  for (const o of ordersInPeriod) {
+    if (!orderIsPaid(o) || !o.checkInId || checkedOutIds.has(o.checkInId)) continue;
+    const amount = Math.max(0, o.amount || 0);
+    foodPaidOnOpenStays += amount;
+    const stay = openStayById.get(o.checkInId);
+    if (stay && stayCollectionChannel(stay) === "bank") bankBalance += amount;
+    else cashBalance += amount;
+  }
 
   const expensesInPeriod = expenses.filter((e) => dateStringInRange(e.date, range));
   const operating = expensesInPeriod.filter((e) => e.kind !== "ga");
   const gaRows = expensesInPeriod.filter((e) => e.kind === "ga");
   const expenditures = operating.reduce((s, e) => s + Math.max(0, e.amount || 0), 0);
   const gaExpenditures = gaRows.reduce((s, e) => s + Math.max(0, e.amount || 0), 0);
+  let expenseCash = 0;
+  let expenseBank = 0;
+  for (const e of expensesInPeriod) {
+    const amount = Math.max(0, e.amount || 0);
+    if (isBankChannel(e.paymentMethod) || e.paymentMethod === "other") {
+      expenseBank += amount;
+    } else {
+      expenseCash += amount;
+    }
+  }
   const byCategory = breakdownByCategory(operating);
   const byGaCategory = breakdownByCategory(gaRows);
 
@@ -227,6 +275,8 @@ export function buildAccountsSnapshot(
     foodDue,
     revenue,
     collected,
+    cashBalance,
+    bankBalance,
     stayCollected,
     toBePaid,
     partialPaid,
@@ -235,6 +285,8 @@ export function buildAccountsSnapshot(
     outstanding: toBePaid,
     expenditures,
     gaExpenditures,
+    expenseCash,
+    expenseBank,
     profit: revenue - expenditures - gaExpenditures,
     checkoutCount: checkedOutInPeriod.length,
     orderCount: ordersInPeriod.length,
