@@ -16,7 +16,7 @@ loadEnv({ path: resolve(root, ".env"), override: true });
 
 const apiKey = process.env.VITE_FIREBASE_API_KEY;
 const projectId = process.env.VITE_FIREBASE_PROJECT_ID;
-const email = "adminthnr@example.com";
+const email = "adminhnr@example.com";
 const password = "adminhnr";
 const serviceAccountPathRaw = process.env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim();
 
@@ -105,7 +105,7 @@ async function upsertWithAdmin(uid) {
   await db.collection("users").doc(uid).set(
     {
       name: "Restaurant Admin",
-      username: "adminthnr",
+      username: "adminhnr",
       phone: "",
       email,
       roleId: ROLE_ID,

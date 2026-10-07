@@ -1,6 +1,6 @@
 /** Dedicated restaurant POS login — redirects to the parcel system. */
 export const RESTAURANT_LOGIN = {
-  email: "adminthnr@example.com",
+  email: "adminhnr@example.com",
   password: "adminhnr",
   homePath: "/restaurant/parcel",
 } as const;

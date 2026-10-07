@@ -84,7 +84,7 @@ export function LoginPage() {
           : "";
       if (isRestaurantCredentials(email, password)) {
         setError(
-          "Restaurant login failed. Create Firebase user adminthnr@example.com with password adminhnr (Auth + users profile), then try again.",
+          "Restaurant login failed. Create Firebase user adminhnr@example.com with password adminhnr (Auth + users profile), then try again.",
         );
       } else {
         setError(mapAuthError(code));
