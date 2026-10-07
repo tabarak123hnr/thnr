@@ -10,12 +10,14 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
-import type {
-  ParcelChannel,
-  ParcelLine,
-  ParcelOrder,
-  ParcelOrderStatus,
-  ParcelPaymentStatus,
+import {
+  parcelLineQty,
+  parcelLineTotal,
+  type ParcelChannel,
+  type ParcelLine,
+  type ParcelOrder,
+  type ParcelOrderStatus,
+  type ParcelPaymentStatus,
 } from "../types/parcel";
 
 export type { ParcelOrder, ParcelLine };
@@ -29,15 +31,20 @@ function mapOrder(id: string, data: Record<string, unknown>): ParcelOrder {
   const linesRaw = Array.isArray(data.lines) ? data.lines : [];
   const lines: ParcelLine[] = linesRaw.map((raw, index) => {
     const row = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const unitPrice = Math.max(0, Number(row.unitPrice) || 0);
+    const qty = parcelLineQty({ qty: Number(row.qty) || 0 });
     return {
       lineId: String(row.lineId ?? `${id}-${index}`),
       menuItemId: String(row.menuItemId ?? ""),
       name: String(row.name ?? ""),
       nameUr: String(row.nameUr ?? ""),
-      unitPrice: Math.max(0, Number(row.unitPrice) || 0),
+      unitPrice,
+      qty,
       chitNo: String(row.chitNo ?? `C${index + 1}`),
     };
   });
+
+  const computedAmount = lines.reduce((s, l) => s + parcelLineTotal(l), 0);
 
   return {
     id,
@@ -47,7 +54,7 @@ function mapOrder(id: string, data: Record<string, unknown>): ParcelOrder {
     customerPhone: String(data.customerPhone ?? ""),
     notes: String(data.notes ?? ""),
     lines,
-    amount: Math.max(0, Number(data.amount) || lines.reduce((s, l) => s + l.unitPrice, 0)),
+    amount: Math.max(0, Number(data.amount) || computedAmount),
     paymentStatus: data.paymentStatus === "paid" ? "paid" : "due",
     status: (["open", "preparing", "ready", "handed_over", "cancelled"].includes(
       String(data.status),
@@ -92,9 +99,10 @@ export async function createParcelOrder(input: {
   const token = nextToken();
   const lines: ParcelLine[] = input.lines.map((line, index) => ({
     ...line,
+    qty: parcelLineQty(line),
     chitNo: `${token}-${String(index + 1).padStart(2, "0")}`,
   }));
-  const amount = lines.reduce((s, l) => s + Math.max(0, l.unitPrice), 0);
+  const amount = lines.reduce((s, l) => s + parcelLineTotal(l), 0);
 
   const ref = await addDoc(collection(db, "parcelOrders"), {
     token,

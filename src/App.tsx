@@ -23,6 +23,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { MenuPage } from "./pages/MenuPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { OrdersPage } from "./pages/OrdersPage";
+import { ParcelOrdersPage } from "./pages/restaurant/ParcelOrdersPage";
 import { ParcelPage } from "./pages/restaurant/ParcelPage";
 import { QrCardsPage } from "./pages/QrCardsPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -44,6 +45,7 @@ export default function App() {
               <Route path="/restaurant" element={<RestaurantShell />}>
                 <Route index element={<Navigate to="parcel" replace />} />
                 <Route path="parcel" element={<ParcelPage />} />
+                <Route path="orders" element={<ParcelOrdersPage />} />
               </Route>
             </Route>
 

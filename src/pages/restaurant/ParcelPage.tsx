@@ -1,4 +1,5 @@
 import {
+  ArrowUpRight,
   Minus,
   Package,
   Plus,
@@ -8,6 +9,7 @@ import {
   UtensilsCrossed,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -15,7 +17,7 @@ import { FancySelect } from "../../components/ui/FancySelect";
 import { Field, Input, PageHeader, TextArea } from "../../components/ui/Page";
 import { useApp } from "../../context/app-context";
 import { useToast } from "../../context/toast-context";
-import { printParcelChits } from "../../lib/parcelChits";
+import { openParcelPrintWindow, printParcelChits } from "../../lib/parcelChits";
 import { cn, formatRs } from "../../lib/utils";
 import { subscribeMenuItems, type MenuItem } from "../../services/menu";
 import {
@@ -24,7 +26,11 @@ import {
   type ParcelOrder,
 } from "../../services/parcels";
 import { MENU_CATEGORIES } from "../../types/menu";
-import type { ParcelPaymentStatus } from "../../types/parcel";
+import {
+  parcelLineTotal,
+  parcelOrderUnits,
+  type ParcelPaymentStatus,
+} from "../../types/parcel";
 
 type CartLine = {
   lineId: string;
@@ -32,6 +38,7 @@ type CartLine = {
   name: string;
   nameUr: string;
   unitPrice: number;
+  qty: number;
 };
 
 function newLineId() {
@@ -56,7 +63,7 @@ export function ParcelPage() {
 
   useEffect(() => {
     const a = subscribeMenuItems(setCatalog);
-    const b = subscribeParcelOrders((rows) => setRecent(rows.slice(0, 8)));
+    const b = subscribeParcelOrders((rows) => setRecent(rows.slice(0, 6)));
     return () => {
       a();
       b();
@@ -83,25 +90,41 @@ export function ParcelPage() {
     });
   }, [available, category, search]);
 
-  const total = cart.reduce((s, l) => s + l.unitPrice, 0);
-  const itemCount = cart.length;
+  const total = cart.reduce((s, l) => s + parcelLineTotal(l), 0);
+  const chitCount = cart.length;
+  const unitCount = parcelOrderUnits(cart);
 
-  /** Each click = one separate chit line (even if same dish). */
+  /** One cart row per dish — qty increases on repeat taps. */
   function addItem(item: MenuItem) {
-    setCart((prev) => [
-      ...prev,
-      {
-        lineId: newLineId(),
-        menuItemId: item.id,
-        name: item.name,
-        nameUr: item.nameUr,
-        unitPrice: item.price,
-      },
-    ]);
+    setCart((prev) => {
+      const existing = prev.find((l) => l.menuItemId === item.id);
+      if (existing) {
+        return prev.map((l) =>
+          l.menuItemId === item.id ? { ...l, qty: l.qty + 1 } : l,
+        );
+      }
+      return [
+        ...prev,
+        {
+          lineId: newLineId(),
+          menuItemId: item.id,
+          name: item.name,
+          nameUr: item.nameUr,
+          unitPrice: item.price,
+          qty: 1,
+        },
+      ];
+    });
   }
 
-  function removeLine(lineId: string) {
-    setCart((prev) => prev.filter((l) => l.lineId !== lineId));
+  function setQty(menuItemId: string, qty: number) {
+    setCart((prev) =>
+      prev
+        .map((l) =>
+          l.menuItemId === menuItemId ? { ...l, qty: Math.max(0, qty) } : l,
+        )
+        .filter((l) => l.qty > 0),
+    );
   }
 
   function clearTicket() {
@@ -120,6 +143,14 @@ export function ParcelPage() {
       return;
     }
 
+    const printWin = openParcelPrintWindow();
+    if (!printWin) {
+      const msg = "Pop-up blocked. Allow pop-ups for this site, then try again.";
+      setPlaceError(msg);
+      toastError("Print blocked", msg);
+      return;
+    }
+
     setPlacing(true);
     try {
       const created = await createParcelOrder({
@@ -131,7 +162,7 @@ export function ParcelPage() {
         lines: cart,
       });
 
-      printParcelChits({
+      const printInput = {
         token: created.token,
         customerName,
         customerPhone,
@@ -141,16 +172,29 @@ export function ParcelPage() {
         amount: created.amount,
         rs: t.common.rs,
         brand: t.brand,
-      });
+      };
+
+      try {
+        printParcelChits(printInput, printWin);
+      } catch (printErr) {
+        printWin.close();
+        const msg =
+          printErr instanceof Error
+            ? printErr.message
+            : "Could not open print window.";
+        setPlaceError(msg);
+        toastError("Print failed", `${created.token} saved — ${msg}`);
+      }
 
       toastSuccess(
-        "Parcel ready",
+        "Parcel saved",
         `${created.token} · ${created.lines.length} chit${
           created.lines.length === 1 ? "" : "s"
         } · ${formatRs(created.amount, t.common.rs)}`,
       );
       clearTicket();
     } catch (err) {
+      printWin.close();
       const message =
         err instanceof Error ? err.message : "Could not create parcel order.";
       setPlaceError(message);
@@ -181,10 +225,10 @@ export function ParcelPage() {
     }
   }
 
-  const lineCountByMenu = useMemo(() => {
+  const qtyByMenu = useMemo(() => {
     const map = new Map<string, number>();
     for (const line of cart) {
-      map.set(line.menuItemId, (map.get(line.menuItemId) || 0) + 1);
+      map.set(line.menuItemId, line.qty);
     }
     return map;
   }, [cart]);
@@ -193,22 +237,30 @@ export function ParcelPage() {
     <div>
       <PageHeader
         title="Parcel counter"
-        subtitle="Tap dishes to add. Bill is combined — each item prints as its own chit."
+        subtitle="One chit per dish. Same dish with higher qty stays on one chit — bill is combined."
         actions={
-          <Badge tone="gold">
-            <Package className="me-1 h-3.5 w-3.5" />
-            Parcel
-          </Badge>
+          <>
+            <Link to="/restaurant/orders">
+              <Button variant="secondary">
+                All orders
+                <ArrowUpRight className="h-4 w-4" />
+              </Button>
+            </Link>
+            <Badge tone="gold">
+              <Package className="me-1 h-3.5 w-3.5" />
+              Parcel
+            </Badge>
+          </>
         }
       />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-app bg-[color-mix(in_oklab,var(--accent)_8%,var(--bg))] px-4 py-3">
           <p className="text-[11px] font-bold uppercase tracking-wide text-muted">
-            On this bill
+            Kitchen chits
           </p>
-          <p className="mt-1 text-2xl font-extrabold">{itemCount}</p>
-          <p className="text-xs text-muted">Separate chits</p>
+          <p className="mt-1 text-2xl font-extrabold">{chitCount}</p>
+          <p className="text-xs text-muted">{unitCount} units total</p>
         </div>
         <div className="rounded-2xl border border-app bg-app px-4 py-3">
           <p className="text-[11px] font-bold uppercase tracking-wide text-muted">
@@ -217,7 +269,7 @@ export function ParcelPage() {
           <p className="mt-1 text-2xl font-extrabold">
             {formatRs(total, t.common.rs)}
           </p>
-          <p className="text-xs text-muted">All items together</p>
+          <p className="text-xs text-muted">All dishes together</p>
         </div>
         <div className="rounded-2xl border border-app bg-app px-4 py-3">
           <p className="text-[11px] font-bold uppercase tracking-wide text-muted">
@@ -236,7 +288,7 @@ export function ParcelPage() {
               <div>
                 <h2 className="font-bold">Menu board</h2>
                 <p className="text-xs text-muted">
-                  Each tap adds one separate item for kitchen chits
+                  Tap to add — tap again to increase qty on the same chit
                 </p>
               </div>
             </div>
@@ -288,7 +340,7 @@ export function ParcelPage() {
           ) : (
             <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
               {filteredMenu.map((item) => {
-                const count = lineCountByMenu.get(item.id) || 0;
+                const qty = qtyByMenu.get(item.id) || 0;
                 return (
                   <button
                     key={item.id}
@@ -296,14 +348,14 @@ export function ParcelPage() {
                     onClick={() => addItem(item)}
                     className={cn(
                       "group relative rounded-2xl border p-4 text-start transition",
-                      count > 0
+                      qty > 0
                         ? "border-[var(--accent)] bg-accent-soft shadow-sm"
                         : "border-app bg-app hover:border-[color-mix(in_oklab,var(--accent)_55%,var(--border))] hover:bg-accent-soft",
                     )}
                   >
-                    {count > 0 ? (
+                    {qty > 0 ? (
                       <span className="absolute end-3 top-3 flex h-6 min-w-6 items-center justify-center rounded-full bg-[var(--accent)] px-1.5 text-xs font-extrabold text-[var(--accent-text)]">
-                        {count}
+                        {qty}
                       </span>
                     ) : null}
                     <p className="pe-8 font-bold leading-snug">
@@ -316,10 +368,6 @@ export function ParcelPage() {
                     </p>
                     <p className="mt-3 text-sm font-extrabold text-[var(--accent)]">
                       {formatRs(item.price, t.common.rs)}
-                    </p>
-                    <p className="mt-2 text-[11px] text-muted">
-                      <Plus className="me-0.5 inline h-3 w-3" />
-                      Add as separate chit
                     </p>
                   </button>
                 );
@@ -335,8 +383,8 @@ export function ParcelPage() {
               <div>
                 <h2 className="font-bold">Parcel bill</h2>
                 <p className="text-xs text-muted">
-                  {itemCount
-                    ? `${itemCount} separate item${itemCount === 1 ? "" : "s"}`
+                  {chitCount
+                    ? `${chitCount} chit${chitCount === 1 ? "" : "s"} · ${unitCount} units`
                     : "Empty"}
                 </p>
               </div>
@@ -384,7 +432,7 @@ export function ParcelPage() {
           <div className="mt-4 max-h-64 space-y-2 overflow-y-auto">
             {cart.length === 0 ? (
               <p className="rounded-xl border border-dashed border-app px-3 py-8 text-center text-sm text-muted">
-                Tap dishes on the left. Same dish twice = two chits.
+                Tap dishes on the left. Same dish again increases qty on one chit.
               </p>
             ) : (
               cart.map((line, index) => (
@@ -400,17 +448,31 @@ export function ParcelPage() {
                       {language === "ur" ? line.nameUr || line.name : line.name}
                     </p>
                     <p className="text-xs text-muted">
-                      Separate chit · {formatRs(line.unitPrice, t.common.rs)}
+                      1 chit · {formatRs(line.unitPrice, t.common.rs)} each
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => removeLine(line.lineId)}
-                    className="rounded-lg p-1.5 text-muted hover:bg-elevated hover:text-app"
-                    title="Remove this chit"
-                  >
-                    <Minus className="h-4 w-4" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setQty(line.menuItemId, line.qty - 1)}
+                      className="rounded-lg border border-app p-1 text-muted hover:bg-elevated"
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </button>
+                    <span className="min-w-[1.25rem] text-center text-sm font-bold tabular-nums">
+                      {line.qty}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setQty(line.menuItemId, line.qty + 1)}
+                      className="rounded-lg border border-app p-1 text-muted hover:bg-elevated"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <p className="w-16 shrink-0 text-end text-sm font-bold tabular-nums">
+                    {formatRs(parcelLineTotal(line), t.common.rs)}
+                  </p>
                 </div>
               ))
             )}
@@ -449,9 +511,15 @@ export function ParcelPage() {
       </div>
 
       <Card className="mt-4">
-        <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-bold">Recent parcels</h2>
-          <p className="text-xs text-muted">Reprint chits anytime</p>
+          <Link
+            to="/restaurant/orders"
+            className="inline-flex items-center gap-1 text-sm font-semibold text-muted hover:text-app"
+          >
+            View all orders
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </Link>
         </div>
         {recent.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted">
@@ -469,7 +537,8 @@ export function ParcelPage() {
                     {order.token}{" "}
                     <span className="font-medium text-muted">
                       · {order.lines.length} chit
-                      {order.lines.length === 1 ? "" : "s"}
+                      {order.lines.length === 1 ? "" : "s"} ·{" "}
+                      {parcelOrderUnits(order.lines)} units
                     </span>
                   </p>
                   <p className="text-xs text-muted">

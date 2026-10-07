@@ -1,5 +1,5 @@
+import { parcelLineQty, parcelLineTotal, type ParcelLine } from "../types/parcel";
 import { formatRs } from "./utils";
-import type { ParcelLine } from "../types/parcel";
 
 function escapeHtml(s: string) {
   return s
@@ -21,97 +21,7 @@ export type ParcelChitPrintInput = {
   brand?: string;
 };
 
-/** One slip per line item (university-style chits) + a combined bill page. */
-export function printParcelChits(input: ParcelChitPrintInput) {
-  const win = window.open("", "_blank", "noopener,noreferrer,width=720,height=900");
-  if (!win) {
-    throw new Error("Pop-up blocked. Allow pop-ups to print chits.");
-  }
-
-  const rs = input.rs || "Rs";
-  const brand = input.brand || "Tabarak Hotel & Restaurant";
-  const when = new Date().toLocaleString();
-
-  const chitPages = input.lines
-    .map((line, index) => {
-      return `
-      <section class="chit page">
-        <header>
-          <p class="brand">${escapeHtml(brand)}</p>
-          <p class="channel">PARCEL CHIT</p>
-        </header>
-        <div class="meta">
-          <div><span>Order</span><strong>${escapeHtml(input.token)}</strong></div>
-          <div><span>Chit</span><strong>${escapeHtml(line.chitNo)}</strong></div>
-          <div><span>Item</span><strong>#${index + 1} of ${input.lines.length}</strong></div>
-          <div><span>Time</span><strong>${escapeHtml(when)}</strong></div>
-        </div>
-        <div class="item">
-          <p class="name">${escapeHtml(line.name)}</p>
-          ${line.nameUr ? `<p class="name-ur">${escapeHtml(line.nameUr)}</p>` : ""}
-          <p class="qty">Qty: 1</p>
-          <p class="price">${escapeHtml(formatRs(line.unitPrice, rs))}</p>
-        </div>
-        ${
-          input.customerName || input.customerPhone
-            ? `<p class="customer">${escapeHtml(
-                [input.customerName, input.customerPhone].filter(Boolean).join(" · "),
-              )}</p>`
-            : ""
-        }
-        <p class="foot">Kitchen slip — separate item · ${escapeHtml(input.paymentStatus.toUpperCase())}</p>
-      </section>`;
-    })
-    .join("");
-
-  const billRows = input.lines
-    .map(
-      (line) => `
-      <tr>
-        <td>${escapeHtml(line.chitNo)}</td>
-        <td>${escapeHtml(line.name)}</td>
-        <td class="num">1</td>
-        <td class="num">${escapeHtml(formatRs(line.unitPrice, rs))}</td>
-      </tr>`,
-    )
-    .join("");
-
-  const billPage = `
-    <section class="bill page">
-      <header>
-        <p class="brand">${escapeHtml(brand)}</p>
-        <p class="channel">PARCEL BILL (COMBINED)</p>
-      </header>
-      <div class="meta">
-        <div><span>Order</span><strong>${escapeHtml(input.token)}</strong></div>
-        <div><span>Items</span><strong>${input.lines.length}</strong></div>
-        <div><span>Time</span><strong>${escapeHtml(when)}</strong></div>
-        <div><span>Payment</span><strong>${escapeHtml(input.paymentStatus.toUpperCase())}</strong></div>
-      </div>
-      ${
-        input.customerName || input.customerPhone
-          ? `<p class="customer">${escapeHtml(
-              [input.customerName, input.customerPhone].filter(Boolean).join(" · "),
-            )}</p>`
-          : ""
-      }
-      <table>
-        <thead>
-          <tr>
-            <th>Chit</th>
-            <th>Item</th>
-            <th class="num">Qty</th>
-            <th class="num">Amount</th>
-          </tr>
-        </thead>
-        <tbody>${billRows}</tbody>
-      </table>
-      <p class="total">Total ${escapeHtml(formatRs(input.amount, rs))}</p>
-      ${input.notes ? `<p class="notes">Notes: ${escapeHtml(input.notes)}</p>` : ""}
-      <p class="foot">Each line above has its own kitchen chit.</p>
-    </section>`;
-
-  const styles = `
+const PRINT_STYLES = `
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -155,10 +65,116 @@ export function printParcelChits(input: ParcelChitPrintInput) {
     }
   `;
 
+function buildPrintHtml(input: ParcelChitPrintInput) {
+  const rs = input.rs || "Rs";
+  const brand = input.brand || "Tabarak Hotel & Restaurant";
+  const when = new Date().toLocaleString();
+
+  const chitPages = input.lines
+    .map((line, index) => {
+      const qty = parcelLineQty(line);
+      const lineTotal = parcelLineTotal(line);
+      return `
+      <section class="chit page">
+        <header>
+          <p class="brand">${escapeHtml(brand)}</p>
+          <p class="channel">PARCEL CHIT</p>
+        </header>
+        <div class="meta">
+          <div><span>Order</span><strong>${escapeHtml(input.token)}</strong></div>
+          <div><span>Chit</span><strong>${escapeHtml(line.chitNo)}</strong></div>
+          <div><span>Dish</span><strong>#${index + 1} of ${input.lines.length}</strong></div>
+          <div><span>Time</span><strong>${escapeHtml(when)}</strong></div>
+        </div>
+        <div class="item">
+          <p class="name">${escapeHtml(line.name)}</p>
+          ${line.nameUr ? `<p class="name-ur">${escapeHtml(line.nameUr)}</p>` : ""}
+          <p class="qty">Qty: ${qty}</p>
+          <p class="price">${escapeHtml(formatRs(lineTotal, rs))}</p>
+          <p class="qty">@ ${escapeHtml(formatRs(line.unitPrice, rs))} each</p>
+        </div>
+        ${
+          input.customerName || input.customerPhone
+            ? `<p class="customer">${escapeHtml(
+                [input.customerName, input.customerPhone].filter(Boolean).join(" · "),
+              )}</p>`
+            : ""
+        }
+        <p class="foot">Kitchen slip · ${escapeHtml(input.paymentStatus.toUpperCase())}</p>
+      </section>`;
+    })
+    .join("");
+
+  const billRows = input.lines
+    .map((line) => {
+      const qty = parcelLineQty(line);
+      return `
+      <tr>
+        <td>${escapeHtml(line.chitNo)}</td>
+        <td>${escapeHtml(line.name)}</td>
+        <td class="num">${qty}</td>
+        <td class="num">${escapeHtml(formatRs(parcelLineTotal(line), rs))}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const billPage = `
+    <section class="bill page">
+      <header>
+        <p class="brand">${escapeHtml(brand)}</p>
+        <p class="channel">PARCEL BILL (COMBINED)</p>
+      </header>
+      <div class="meta">
+        <div><span>Order</span><strong>${escapeHtml(input.token)}</strong></div>
+        <div><span>Chits</span><strong>${input.lines.length}</strong></div>
+        <div><span>Time</span><strong>${escapeHtml(when)}</strong></div>
+        <div><span>Payment</span><strong>${escapeHtml(input.paymentStatus.toUpperCase())}</strong></div>
+      </div>
+      ${
+        input.customerName || input.customerPhone
+          ? `<p class="customer">${escapeHtml(
+              [input.customerName, input.customerPhone].filter(Boolean).join(" · "),
+            )}</p>`
+          : ""
+      }
+      <table>
+        <thead>
+          <tr>
+            <th>Chit</th>
+            <th>Item</th>
+            <th class="num">Qty</th>
+            <th class="num">Amount</th>
+          </tr>
+        </thead>
+        <tbody>${billRows}</tbody>
+      </table>
+      <p class="total">Total ${escapeHtml(formatRs(input.amount, rs))}</p>
+      ${input.notes ? `<p class="notes">Notes: ${escapeHtml(input.notes)}</p>` : ""}
+      <p class="foot">One chit per dish line · combined total above.</p>
+    </section>`;
+
+  return `<!DOCTYPE html><html><head><title>Parcel ${escapeHtml(input.token)}</title>
+    <style>${PRINT_STYLES}</style></head><body>${chitPages}${billPage}</body></html>`;
+}
+
+/** Call synchronously from a click handler before any await. */
+export function openParcelPrintWindow() {
+  return window.open("", "_blank", "width=720,height=900");
+}
+
+export function renderParcelPrintDocument(win: Window, input: ParcelChitPrintInput) {
   win.document.open();
-  win.document.write(`<!DOCTYPE html><html><head><title>Parcel ${escapeHtml(input.token)}</title>
-    <style>${styles}</style></head><body>${chitPages}${billPage}</body></html>`);
+  win.document.write(buildPrintHtml(input));
   win.document.close();
   win.focus();
   setTimeout(() => win.print(), 350);
+}
+
+/** One slip per dish line + combined bill (opens window immediately). */
+export function printParcelChits(input: ParcelChitPrintInput, existingWin?: Window | null) {
+  const win = existingWin ?? openParcelPrintWindow();
+  if (!win) {
+    throw new Error("Pop-up blocked. Allow pop-ups to print chits.");
+  }
+  renderParcelPrintDocument(win, input);
 }

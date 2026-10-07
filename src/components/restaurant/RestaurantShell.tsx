@@ -1,4 +1,4 @@
-import { LogOut, Package, Truck } from "lucide-react";
+import { ClipboardList, LogOut, Package, Truck } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { Button } from "../ui/Button";
 import { useAuth } from "../../context/auth-context";
@@ -6,6 +6,7 @@ import { cn } from "../../lib/utils";
 
 const links = [
   { to: "/restaurant/parcel", label: "Parcel", icon: Package, ready: true },
+  { to: "/restaurant/orders", label: "Orders", icon: ClipboardList, ready: true },
   { to: "/restaurant/delivery", label: "Delivery", icon: Truck, ready: false },
 ];
 
