@@ -9,7 +9,7 @@ import { EmptyState, PageHeader } from "../../components/ui/Page";
 import { Table, Td, Tr } from "../../components/ui/Table";
 import { useApp } from "../../context/app-context";
 import { useToast } from "../../context/toast-context";
-import { printParcelChits } from "../../lib/parcelChits";
+import { tryPrintParcelChits } from "../../lib/parcelChits";
 import { formatRs } from "../../lib/utils";
 import { subscribeParcelOrders, type ParcelOrder } from "../../services/parcels";
 import {
@@ -97,23 +97,19 @@ export function ParcelOrdersPage() {
   }, [orders, search]);
 
   function reprint(order: ParcelOrder) {
-    try {
-      printParcelChits({
-        token: order.token,
-        customerName: order.customerName,
-        customerPhone: order.customerPhone,
-        notes: order.notes,
-        paymentStatus: order.paymentStatus,
-        lines: order.lines,
-        amount: order.amount,
-        rs: t.common.rs,
-        brand: t.brand,
-      });
-    } catch (err) {
-      toastError(
-        "Print failed",
-        err instanceof Error ? err.message : "Allow pop-ups to print.",
-      );
+    const result = tryPrintParcelChits({
+      token: order.token,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      notes: order.notes,
+      paymentStatus: order.paymentStatus,
+      lines: order.lines,
+      amount: order.amount,
+      rs: t.common.rs,
+      brand: t.brand,
+    });
+    if (!result.ok) {
+      toastError("Print skipped", result.message);
     }
   }
 

@@ -17,7 +17,11 @@ import { FancySelect } from "../../components/ui/FancySelect";
 import { Field, Input, PageHeader, TextArea } from "../../components/ui/Page";
 import { useApp } from "../../context/app-context";
 import { useToast } from "../../context/toast-context";
-import { openParcelPrintWindow, printParcelChits } from "../../lib/parcelChits";
+import {
+  closeParcelPrintWindow,
+  openParcelPrintWindow,
+  tryPrintParcelChits,
+} from "../../lib/parcelChits";
 import { cn, formatRs } from "../../lib/utils";
 import { subscribeMenuItems, type MenuItem } from "../../services/menu";
 import {
@@ -143,13 +147,8 @@ export function ParcelPage() {
       return;
     }
 
+    // Open early so print can work later with a printer; never block saving if blocked.
     const printWin = openParcelPrintWindow();
-    if (!printWin) {
-      const msg = "Pop-up blocked. Allow pop-ups for this site, then try again.";
-      setPlaceError(msg);
-      toastError("Print blocked", msg);
-      return;
-    }
 
     setPlacing(true);
     try {
@@ -162,39 +161,38 @@ export function ParcelPage() {
         lines: cart,
       });
 
-      const printInput = {
-        token: created.token,
-        customerName,
-        customerPhone,
-        notes,
-        paymentStatus,
-        lines: created.lines,
-        amount: created.amount,
-        rs: t.common.rs,
-        brand: t.brand,
-      };
-
-      try {
-        printParcelChits(printInput, printWin);
-      } catch (printErr) {
-        printWin.close();
-        const msg =
-          printErr instanceof Error
-            ? printErr.message
-            : "Could not open print window.";
-        setPlaceError(msg);
-        toastError("Print failed", `${created.token} saved — ${msg}`);
-      }
-
-      toastSuccess(
-        "Parcel saved",
-        `${created.token} · ${created.lines.length} chit${
-          created.lines.length === 1 ? "" : "s"
-        } · ${formatRs(created.amount, t.common.rs)}`,
+      const printResult = tryPrintParcelChits(
+        {
+          token: created.token,
+          customerName,
+          customerPhone,
+          notes,
+          paymentStatus,
+          lines: created.lines,
+          amount: created.amount,
+          rs: t.common.rs,
+          brand: t.brand,
+        },
+        printWin,
       );
+
+      if (!printResult.ok) {
+        closeParcelPrintWindow(printWin);
+        toastSuccess(
+          "Parcel saved",
+          `${created.token} · ${formatRs(created.amount, t.common.rs)} · print skipped — use Reprint when ready`,
+        );
+      } else {
+        toastSuccess(
+          "Parcel saved",
+          `${created.token} · ${created.lines.length} chit${
+            created.lines.length === 1 ? "" : "s"
+          } · ${formatRs(created.amount, t.common.rs)} · print dialog opened (cancel if no printer)`,
+        );
+      }
       clearTicket();
     } catch (err) {
-      printWin.close();
+      closeParcelPrintWindow(printWin);
       const message =
         err instanceof Error ? err.message : "Could not create parcel order.";
       setPlaceError(message);
@@ -205,23 +203,19 @@ export function ParcelPage() {
   }
 
   function reprint(order: ParcelOrder) {
-    try {
-      printParcelChits({
-        token: order.token,
-        customerName: order.customerName,
-        customerPhone: order.customerPhone,
-        notes: order.notes,
-        paymentStatus: order.paymentStatus,
-        lines: order.lines,
-        amount: order.amount,
-        rs: t.common.rs,
-        brand: t.brand,
-      });
-    } catch (err) {
-      toastError(
-        "Print failed",
-        err instanceof Error ? err.message : "Allow pop-ups to print.",
-      );
+    const result = tryPrintParcelChits({
+      token: order.token,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      notes: order.notes,
+      paymentStatus: order.paymentStatus,
+      lines: order.lines,
+      amount: order.amount,
+      rs: t.common.rs,
+      brand: t.brand,
+    });
+    if (!result.ok) {
+      toastError("Print skipped", result.message);
     }
   }
 
@@ -505,7 +499,7 @@ export function ParcelPage() {
             onClick={() => void placeAndPrint()}
           >
             <Printer className="h-4 w-4" />
-            {placing ? "Saving…" : "Confirm & print chits"}
+            {placing ? "Saving order…" : "Confirm order"}
           </Button>
         </Card>
       </div>

@@ -157,9 +157,22 @@ function buildPrintHtml(input: ParcelChitPrintInput) {
     <style>${PRINT_STYLES}</style></head><body>${chitPages}${billPage}</body></html>`;
 }
 
-/** Call synchronously from a click handler before any await. */
+export type ParcelPrintResult =
+  | { ok: true }
+  | { ok: false; reason: "blocked" | "failed"; message: string };
+
+/** Call synchronously from a click handler before any await (keeps pop-up allowed). */
 export function openParcelPrintWindow() {
   return window.open("", "_blank", "width=720,height=900");
+}
+
+export function closeParcelPrintWindow(win: Window | null | undefined) {
+  if (!win || win.closed) return;
+  try {
+    win.close();
+  } catch {
+    // ignore
+  }
 }
 
 export function renderParcelPrintDocument(win: Window, input: ParcelChitPrintInput) {
@@ -167,14 +180,51 @@ export function renderParcelPrintDocument(win: Window, input: ParcelChitPrintInp
   win.document.write(buildPrintHtml(input));
   win.document.close();
   win.focus();
-  setTimeout(() => win.print(), 350);
+  // Dialog opens when a printer is available; user can Cancel — order is already saved.
+  setTimeout(() => {
+    try {
+      win.print();
+    } catch {
+      // No printer / print API unavailable — leave the preview window open for later.
+    }
+  }, 350);
 }
 
-/** One slip per dish line + combined bill (opens window immediately). */
-export function printParcelChits(input: ParcelChitPrintInput, existingWin?: Window | null) {
+/**
+ * Best-effort print. Never throws — callers should save the order regardless of result.
+ * Pass a window opened on the click (before await) when possible.
+ */
+export function tryPrintParcelChits(
+  input: ParcelChitPrintInput,
+  existingWin?: Window | null,
+): ParcelPrintResult {
+  const ownedWindow = !existingWin;
   const win = existingWin ?? openParcelPrintWindow();
   if (!win) {
-    throw new Error("Pop-up blocked. Allow pop-ups to print chits.");
+    return {
+      ok: false,
+      reason: "blocked",
+      message:
+        "Print preview blocked. Order is still saved — allow pop-ups and use Reprint when you have a printer.",
+    };
   }
-  renderParcelPrintDocument(win, input);
+
+  try {
+    renderParcelPrintDocument(win, input);
+    return { ok: true };
+  } catch {
+    if (ownedWindow) closeParcelPrintWindow(win);
+    return {
+      ok: false,
+      reason: "failed",
+      message:
+        "Could not open print preview. Order is still saved — use Reprint later.",
+    };
+  }
+}
+
+/** Same as tryPrint but throws (for places that want explicit handling). */
+export function printParcelChits(input: ParcelChitPrintInput, existingWin?: Window | null) {
+  const result = tryPrintParcelChits(input, existingWin);
+  if (!result.ok) throw new Error(result.message);
 }
