@@ -43,6 +43,6 @@ export function parcelLineTotal(line: Pick<ParcelLine, "unitPrice" | "qty">) {
   return Math.round(parcelLineQty(line) * Math.max(0, Number(line.unitPrice) || 0) * 100) / 100;
 }
 
-export function parcelOrderUnits(lines: ParcelLine[]) {
+export function parcelOrderUnits(lines: Pick<ParcelLine, "qty">[]) {
   return lines.reduce((s, l) => s + parcelLineQty(l), 0);
 }
