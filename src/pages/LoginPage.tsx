@@ -3,6 +3,11 @@ import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/Button";
 import { pathPermission } from "../config/navigation";
+import {
+  isRestaurantCredentials,
+  isRestaurantEmail,
+  RESTAURANT_LOGIN,
+} from "../config/restaurantAuth";
 import { useApp } from "../context/app-context";
 import { useAuth } from "../context/auth-context";
 
@@ -37,6 +42,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   function pickLanding(preferred?: string | null) {
+    if (isRestaurantEmail(user?.email)) return RESTAURANT_LOGIN.homePath;
     if (preferred) {
       const need = pathPermission[preferred];
       if (!need || isAdmin || hasPermission(need)) return preferred;
@@ -58,6 +64,13 @@ export function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
+      // Dedicated restaurant POS account → parcel system after sign-in
+      if (isRestaurantCredentials(email, password)) {
+        const home = await login(RESTAURANT_LOGIN.email, RESTAURANT_LOGIN.password);
+        navigate(home || RESTAURANT_LOGIN.homePath, { replace: true });
+        return;
+      }
+
       const home = await login(email, password);
       if (!home) {
         setError("No modules assigned to this account. Contact an admin.");
@@ -69,7 +82,13 @@ export function LoginPage() {
         err && typeof err === "object" && "code" in err
           ? String((err as { code: string }).code)
           : "";
-      setError(mapAuthError(code));
+      if (isRestaurantCredentials(email, password)) {
+        setError(
+          "Restaurant login failed. Create Firebase user adminthnr@example.com with password adminhnr (Auth + users profile), then try again.",
+        );
+      } else {
+        setError(mapAuthError(code));
+      }
     } finally {
       setSubmitting(false);
     }

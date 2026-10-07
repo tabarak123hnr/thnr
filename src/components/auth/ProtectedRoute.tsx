@@ -1,5 +1,9 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { pathPermission } from "../../config/navigation";
+import {
+  isRestaurantEmail,
+  RESTAURANT_LOGIN,
+} from "../../config/restaurantAuth";
 import { useAuth } from "../../context/auth-context";
 import { Button } from "../ui/Button";
 
@@ -20,6 +24,11 @@ export function ProtectedRoute() {
 
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  // Restaurant POS account stays in the restaurant shell
+  if (isRestaurantEmail(user.email)) {
+    return <Navigate to={RESTAURANT_LOGIN.homePath} replace />;
   }
 
   if (!defaultPath) {

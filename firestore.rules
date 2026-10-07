@@ -130,6 +130,13 @@ service cloud.firestore {
       allow delete: if signedIn();
     }
 
+    // Restaurant parcel / takeaway orders (separate chits per item)
+    match /parcelOrders/{orderId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if isAdmin();
+    }
+
     // Miscellaneous bills — laundry, bedsheet, amenities
     match /miscBills/{billId} {
       allow read, create, update, delete: if signedIn();

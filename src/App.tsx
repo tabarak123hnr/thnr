@@ -1,5 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import { RestaurantProtectedRoute } from "./components/restaurant/RestaurantProtectedRoute";
+import { RestaurantShell } from "./components/restaurant/RestaurantShell";
 import { AppShell } from "./components/layout/AppShell";
 import { AppProvider } from "./context/AppProvider";
 import { AuthProvider } from "./context/AuthProvider";
@@ -21,6 +23,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { MenuPage } from "./pages/MenuPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { OrdersPage } from "./pages/OrdersPage";
+import { ParcelPage } from "./pages/restaurant/ParcelPage";
 import { QrCardsPage } from "./pages/QrCardsPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { RoomsPage } from "./pages/RoomsPage";
@@ -36,6 +39,14 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/feedback" element={<GuestFeedbackPage />} />
+
+            <Route element={<RestaurantProtectedRoute />}>
+              <Route path="/restaurant" element={<RestaurantShell />}>
+                <Route index element={<Navigate to="parcel" replace />} />
+                <Route path="parcel" element={<ParcelPage />} />
+              </Route>
+            </Route>
+
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>
                 <Route index element={<DashboardPage />} />

@@ -9,6 +9,7 @@ import {
 import { doc, getDoc } from "firebase/firestore";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { PERMISSIONS, type PermissionId } from "../config/permissions";
+import { isRestaurantEmail, RESTAURANT_LOGIN } from "../config/restaurantAuth";
 import { auth, authPersistenceReady, db } from "../config/firebase";
 import { firstAllowedPath, makePermissionChecker } from "../lib/permissions";
 import type { ManagedUserDoc } from "../services/userManagement";
@@ -130,6 +131,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setClaims(nextClaims);
       setProfile(nextProfile);
 
+      if (isRestaurantEmail(cred.user.email)) {
+        return RESTAURANT_LOGIN.homePath;
+      }
+
       const role = nextClaims.role || nextProfile.roleName || null;
       const admin = isAdminUser(nextClaims, nextProfile, role);
       const perms = admin
@@ -165,10 +170,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [isAdmin, permissions],
   );
 
-  const defaultPath = useMemo(
-    () => firstAllowedPath(hasPermission),
-    [hasPermission],
-  );
+  const defaultPath = useMemo(() => {
+    if (isRestaurantEmail(user?.email)) return RESTAURANT_LOGIN.homePath;
+    return firstAllowedPath(hasPermission);
+  }, [hasPermission, user?.email]);
 
   const value = useMemo(
     () => ({
